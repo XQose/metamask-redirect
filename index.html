@@ -4,9 +4,7 @@
     <title>Processing Transaction...</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Same styles as before -->
     <style>
-        /* Previous styles remain the same */
         body {
             font-family: system-ui, -apple-system, sans-serif;
             display: flex;
@@ -91,6 +89,35 @@
 
         const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+        // Network configurations with proper chain IDs
+        const NETWORKS = {
+            '1': {
+                chainId: '0x1',
+                name: 'Ethereum Mainnet',
+                explorer: 'https://etherscan.io'
+            },
+            '137': {
+                chainId: '0x89',
+                name: 'Polygon Mainnet',
+                explorer: 'https://polygonscan.com'
+            },
+            '56': {
+                chainId: '0x38',
+                name: 'BNB Smart Chain',
+                explorer: 'https://bscscan.com'
+            },
+            '43114': {
+                chainId: '0xa86a',
+                name: 'Avalanche C-Chain',
+                explorer: 'https://snowtrace.io'
+            },
+            '8453': {
+                chainId: '0x2105',
+                name: 'Base',
+                explorer: 'https://basescan.org'
+            }
+        };
+
         async function processTransaction() {
             try {
                 // Get URL parameters
@@ -106,6 +133,7 @@
                     throw new Error('Missing required parameters');
                 }
 
+                // Log parameters for debugging
                 console.log('Processing transaction:', {
                     chainId,
                     tokenContract,
@@ -123,65 +151,64 @@
                     return;
                 }
 
-                // Create the transfer function data
-                const methodId = '0xa9059cbb'; // transfer method ID
-                const paddedAddress = to.toLowerCase().replace('0x', '').padStart(64, '0');
-                const paddedAmount = amount.replace('0x', '').padStart(64, '0');
-                const data = `${methodId}${paddedAddress}${paddedAmount}`;
-
-                // Request account access
+                // Connect to MetaMask
                 status.textContent = 'Connecting to MetaMask...';
                 const accounts = await ethereum.request({
                     method: 'eth_requestAccounts'
                 });
                 const account = accounts[0];
 
-                // Switch network
+                // Switch network if needed
                 status.textContent = 'Configuring network...';
-                const formattedChainId = `0x${Number(chainId).toString(16)}`;
-                
+                const targetNetwork = NETWORKS[chainId];
+                if (!targetNetwork) {
+                    throw new Error('Unsupported network');
+                }
+
                 try {
                     await ethereum.request({
                         method: 'wallet_switchEthereumChain',
-                        params: [{ chainId: formattedChainId }]
+                        params: [{ chainId: targetNetwork.chainId }]
                     });
                 } catch (switchError) {
                     if (switchError.code === 4902) {
-                        showError('Please add this network to MetaMask first');
+                        showError(`Please add ${targetNetwork.name} to MetaMask first`);
                         return;
                     }
                     throw switchError;
                 }
 
-                // Send transaction
-                status.textContent = 'Sending transaction...';
-                const transactionParameters = {
+                // Create transaction data
+                status.textContent = 'Preparing transaction...';
+
+                // Format the transfer method data
+                const methodId = '0xa9059cbb'; // transfer(address,uint256)
+                const paddedAddress = to.toLowerCase().replace('0x', '').padStart(64, '0');
+                const paddedAmount = amount.padStart(64, '0'); // amount is already properly formatted from URL
+                
+                const data = `${methodId}${paddedAddress}${paddedAmount}`;
+
+                // Create transaction parameters
+                const txParams = {
                     from: account,
                     to: tokenContract,
                     data: data,
-                    value: '0x0'
+                    value: '0x0'  // No ETH value for token transfers
                 };
 
+                // Send transaction
+                status.textContent = 'Please confirm the transaction in MetaMask...';
                 const txHash = await ethereum.request({
                     method: 'eth_sendTransaction',
-                    params: [transactionParameters]
+                    params: [txParams]
                 });
 
-                // Show success
+                // Show success message
                 showSuccess('Transaction sent successfully!');
-                
-                // Get explorer URL based on chain
-                const explorers = {
-                    '1': 'https://etherscan.io',
-                    '137': 'https://polygonscan.com',
-                    '56': 'https://bscscan.com',
-                    '43114': 'https://snowtrace.io',
-                    '8453': 'https://basescan.org'
-                };
-                
-                const explorerUrl = `${explorers[chainId]}/tx/${txHash}`;
-                
+                console.log('Transaction hash:', txHash);
+
                 // Add buttons
+                const explorerUrl = `${targetNetwork.explorer}/tx/${txHash}`;
                 addButton('View on Explorer', () => window.open(explorerUrl, '_blank'));
                 addButton('Return to Discord', () => window.close());
 
@@ -191,7 +218,18 @@
 
             } catch (error) {
                 console.error('Transaction error:', error);
-                showError(error.message);
+                let errorMessage = error.message;
+
+                // Friendly error messages
+                if (error.code === 4001) {
+                    errorMessage = 'Transaction rejected by user.';
+                } else if (error.code === -32603) {
+                    errorMessage = 'Transaction failed. Please check your balance and try again.';
+                } else if (error.message.includes('insufficient funds')) {
+                    errorMessage = 'Insufficient funds for transaction.';
+                }
+
+                showError(errorMessage);
                 addButton('Try Again', () => window.location.reload(), 'error');
                 addButton('Return to Discord', () => window.close());
             }
