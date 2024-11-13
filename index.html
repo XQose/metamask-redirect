@@ -38,23 +38,89 @@
             color: #e74c3c;
             margin: 10px 0;
         }
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 10px;
+            border-radius: 5px;
+            background: #3498db;
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .button.error {
+            background: #e74c3c;
+        }
     </style>
 </head>
 <body>
     <h1>Processing Transaction</h1>
     <div class="loader"></div>
-    <p id="status">Connecting to wallet...</p>
+    <p id="status">Initializing...</p>
+    <div id="actions" style="display: none;"></div>
     
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.8.0/web3.min.js"></script>
     <script>
+        const status = document.getElementById('status');
+        const actions = document.getElementById('actions');
+        
         const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+        
+        function showError(message) {
+            status.innerHTML = `Error: ${message}`;
+            status.className = 'error';
+        }
+
+        function addButton(text, onClick, isError = false) {
+            const button = document.createElement('button');
+            button.className = `button${isError ? ' error' : ''}`;
+            button.textContent = text;
+            button.onclick = onClick;
+            actions.appendChild(button);
+            actions.style.display = 'block';
+        }
+
+        async function initializeWeb3() {
+            if (typeof window.ethereum !== 'undefined') {
+                window.web3 = new Web3(window.ethereum);
+                return true;
+            } else if (typeof window.web3 !== 'undefined') {
+                window.web3 = new Web3(window.web3.currentProvider);
+                return true;
+            }
+            return false;
+        }
+
+        async function requestAccount() {
+            try {
+                status.textContent = 'Requesting account access...';
+                const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+                return accounts[0];
+            } catch (error) {
+                throw new Error('Failed to connect wallet: ' + error.message);
+            }
+        }
+
+        async function switchNetwork(chainId) {
+            try {
+                status.textContent = 'Switching network...';
+                const targetChainId = `0x${parseInt(chainId).toString(16)}`;
+                await ethereum.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: targetChainId }],
+                });
+                await sleep(1000); // Wait for network switch
+            } catch (error) {
+                throw new Error('Failed to switch network: ' + error.message);
+            }
+        }
 
         async function processTransaction() {
-            const status = document.getElementById('status');
-            
             try {
-                if (typeof window.ethereum === 'undefined') {
+                // Initialize Web3
+                if (!await initializeWeb3()) {
                     if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
-                        window.location.href = 'https://metamask.app.link/dapp/your-github-username.github.io/metamask-redirect';
+                        window.location.href = 'https://metamask.app.link/dapp/xqose.github.io/metamask-redirect';
                         return;
                     } else {
                         window.location.href = 'https://metamask.io/download/';
@@ -69,72 +135,71 @@
                 const toAddress = params.get('to');
                 const amount = params.get('amount');
 
-                // Request account access
-                status.textContent = 'Requesting wallet connection...';
-                const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
-                const userAddress = accounts[0];
-
-                // Switch network if needed
-                status.textContent = 'Checking network...';
-                const currentChainId = await ethereum.request({ method: 'eth_chainId' });
-                const targetChainId = `0x${parseInt(chainId).toString(16)}`;
+                // Connect wallet
+                const userAddress = await requestAccount();
                 
-                if (currentChainId !== targetChainId) {
-                    status.textContent = 'Switching network...';
-                    try {
-                        await ethereum.request({
-                            method: 'wallet_switchEthereumChain',
-                            params: [{ chainId: targetChainId }],
-                        });
-                        // Wait a moment for the network switch to complete
-                        await sleep(1000);
-                    } catch (switchError) {
-                        status.textContent = 'Error switching network. Please switch manually.';
-                        throw switchError;
-                    }
+                // Switch network if needed
+                await switchNetwork(chainId);
+
+                // Check if we need to approve
+                status.textContent = 'Checking allowance...';
+                const tokenABI = [{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"},{"name":"_spender","type":"address"}],"name":"allowance","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"}];
+                const contract = new web3.eth.Contract(tokenABI, tokenContract);
+                
+                const allowance = await contract.methods.allowance(userAddress, toAddress).call();
+                if (BigInt(allowance) < BigInt(amount)) {
+                    status.textContent = 'Approval required. Please approve the transaction...';
+                    const approveData = contract.methods.approve(toAddress, amount).encodeABI();
+                    const approveTx = {
+                        from: userAddress,
+                        to: tokenContract,
+                        data: approveData
+                    };
+                    
+                    await ethereum.request({
+                        method: 'eth_sendTransaction',
+                        params: [approveTx],
+                    });
+                    
+                    status.textContent = 'Waiting for approval confirmation...';
+                    await sleep(2000); // Wait for approval to be mined
                 }
 
-                // Prepare transaction data
+                // Send transfer transaction
+                status.textContent = 'Preparing transfer...';
                 const data = `0xa9059cbb${toAddress.slice(2).padStart(64, '0')}${BigInt(amount).toString(16).padStart(64, '0')}`;
-                
-                // Send transaction
-                status.textContent = 'Preparing transaction...';
-                const transactionParameters = {
-                    to: tokenContract,
+                const transferTx = {
                     from: userAddress,
+                    to: tokenContract,
                     data: data,
-                    chainId: targetChainId
+                    value: '0x0'
                 };
 
-                status.textContent = 'Waiting for confirmation...';
+                status.textContent = 'Please confirm the transaction in your wallet...';
                 const txHash = await ethereum.request({
                     method: 'eth_sendTransaction',
-                    params: [transactionParameters],
+                    params: [transferTx],
                 });
 
-                status.textContent = `Transaction sent! Hash: ${txHash}`;
-                
-                // Add a button to view on explorer
-                const chainExplorers = {
+                // Show success and explorer link
+                const explorers = {
                     '1': 'https://etherscan.io',
-                    '56': 'https://bscscan.com',
                     '137': 'https://polygonscan.com',
+                    '56': 'https://bscscan.com',
                     '43114': 'https://snowtrace.io',
                     '8453': 'https://basescan.org'
                 };
                 
-                const explorerUrl = `${chainExplorers[chainId]}/tx/${txHash}`;
-                const viewButton = document.createElement('a');
-                viewButton.href = explorerUrl;
-                viewButton.target = '_blank';
-                viewButton.textContent = 'View on Explorer';
-                viewButton.style = 'display: inline-block; margin-top: 20px; padding: 10px 20px; background: #3498db; color: white; text-decoration: none; border-radius: 5px;';
-                document.body.appendChild(viewButton);
+                status.textContent = 'Transaction sent!';
+                const explorerUrl = `${explorers[chainId]}/tx/${txHash}`;
+                addButton('View on Explorer', () => window.open(explorerUrl, '_blank'));
+                addButton('Return to Discord', () => window.close());
 
             } catch (error) {
                 console.error('Error:', error);
-                status.innerHTML = `Error: ${error.message}<br>Please try again or contact support.`;
-                status.className = 'error';
+                showError(error.message);
+                addButton('Try Again', () => window.location.reload(), true);
+                addButton('Return to Discord', () => window.close());
             }
         }
 
