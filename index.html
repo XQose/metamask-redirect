@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Processing Transaction</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.3.0/web3.min.js"></script>
+    <!-- Add this line to ensure Web3 is loaded properly -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.3.0/web3.min.js" crossorigin="anonymous"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -89,10 +90,29 @@
         let currentAccount;
         let params = new URLSearchParams(window.location.search);
         
+        // Check if MetaMask is installed
+        async function checkMetaMask() {
+            if (typeof window.ethereum !== 'undefined') {
+                try {
+                    // Create Web3 instance
+                    web3 = new Web3(window.ethereum);
+                    return true;
+                } catch (error) {
+                    console.error('Error initializing Web3:', error);
+                    updateStatus('Error initializing Web3: ' + error.message, 'error');
+                    return false;
+                }
+            } else {
+                updateStatus('MetaMask is not installed. Please install MetaMask to continue.', 'error');
+                return false;
+            }
+        }
+
         const requiredParams = ['chainId', 'tokenContract', 'to', 'amount', 'decimals'];
         
         // ERC20 Transfer function ABI
-        const transferABI = {
+        const erc20ABI = [{
+            "constant": false,
             "inputs": [
                 {"name": "_to", "type": "address"},
                 {"name": "_value", "type": "uint256"}
@@ -100,42 +120,35 @@
             "name": "transfer",
             "outputs": [{"name": "", "type": "bool"}],
             "type": "function"
-        };
+        }];
 
         const chainConfigs = {
             "1": {
                 name: "Ethereum Mainnet",
                 rpcUrls: ["https://mainnet.infura.io/v3/"],
-                nativeCurrency: { symbol: "ETH", decimals: 18 },
+                nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
                 blockExplorerUrls: ["https://etherscan.io"]
             },
             "137": {
                 name: "Polygon Mainnet",
                 rpcUrls: ["https://polygon-rpc.com"],
-                nativeCurrency: { symbol: "MATIC", decimals: 18 },
+                nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
                 blockExplorerUrls: ["https://polygonscan.com"]
             },
             "56": {
-                name: "BNB Smart Chain",
+                name: "BSC Mainnet",
                 rpcUrls: ["https://bsc-dataseed1.binance.org"],
-                nativeCurrency: { symbol: "BNB", decimals: 18 },
+                nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
                 blockExplorerUrls: ["https://bscscan.com"]
-            },
-            "43114": {
-                name: "Avalanche C-Chain",
-                rpcUrls: ["https://api.avax.network/ext/bc/C/rpc"],
-                nativeCurrency: { symbol: "AVAX", decimals: 18 },
-                blockExplorerUrls: ["https://snowtrace.io"]
-            },
-            "8453": {
-                name: "Base",
-                rpcUrls: ["https://mainnet.base.org"],
-                nativeCurrency: { symbol: "ETH", decimals: 18 },
-                blockExplorerUrls: ["https://basescan.org"]
             }
         };
 
         async function initialize() {
+            // Check MetaMask first
+            if (!await checkMetaMask()) {
+                return;
+            }
+
             // Validate parameters
             for (let param of requiredParams) {
                 if (!params.get(param)) {
@@ -144,17 +157,10 @@
                 }
             }
 
-            // Check if MetaMask is installed
-            if (typeof window.ethereum === 'undefined') {
-                updateStatus('Please install MetaMask to continue', 'error');
-                return;
-            }
-
             try {
                 // Request account access
                 const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
                 currentAccount = accounts[0];
-                web3 = new Web3(window.ethereum);
 
                 // Check if we're on the correct network
                 const chainId = await web3.eth.getChainId();
@@ -174,6 +180,7 @@
                 displayTransactionDetails();
 
             } catch (error) {
+                console.error('Initialization error:', error);
                 updateStatus(`Error: ${error.message}`, 'error');
             }
         }
@@ -206,7 +213,7 @@
                 // Reload page after successful switch
                 window.location.reload();
             } catch (switchError) {
-                // If the chain hasn't been added to MetaMask
+                // This error code indicates that the chain has not been added to MetaMask
                 if (switchError.code === 4902) {
                     try {
                         await window.ethereum.request({
@@ -240,18 +247,23 @@
                 const amount = params.get('amount');
                 
                 // Create contract instance
-                const contract = new web3.eth.Contract([transferABI], tokenContract);
+                const contract = new web3.eth.Contract(erc20ABI, tokenContract);
                 
                 // Estimate gas
-                const gasEstimate = await contract.methods.transfer(to, '0x' + amount).estimateGas({
-                    from: currentAccount
-                });
+                let gasEstimate;
+                try {
+                    gasEstimate = await contract.methods.transfer(to, '0x' + amount)
+                        .estimateGas({ from: currentAccount });
+                } catch (error) {
+                    console.error('Gas estimation error:', error);
+                    gasEstimate = 100000; // Fallback gas limit
+                }
 
                 // Get gas price
                 const gasPrice = await web3.eth.getGasPrice();
 
                 // Prepare transaction
-                const encodedData = contract.methods.transfer(to, '0x' + amount).encodeABI();
+                const data = contract.methods.transfer(to, '0x' + amount).encodeABI();
 
                 // Send transaction
                 const tx = await window.ethereum.request({
@@ -259,7 +271,7 @@
                     params: [{
                         from: currentAccount,
                         to: tokenContract,
-                        data: encodedData,
+                        data: data,
                         gas: web3.utils.toHex(Math.floor(gasEstimate * 1.1)), // Add 10% buffer
                         gasPrice: web3.utils.toHex(gasPrice)
                     }],
@@ -280,6 +292,7 @@
                 }
 
             } catch (error) {
+                console.error('Transaction error:', error);
                 document.getElementById('sendButton').disabled = false;
                 updateStatus(`Error: ${error.message}`, 'error');
             }
@@ -292,7 +305,7 @@
         }
 
         // Initialize when page loads
-        initialize();
+        window.addEventListener('load', initialize);
 
         // Listen for account changes
         if (window.ethereum) {
