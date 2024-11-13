@@ -4,8 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Processing Transaction</title>
-    <!-- Add this line to ensure Web3 is loaded properly -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.3.0/web3.min.js" crossorigin="anonymous"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -52,9 +50,6 @@
             font-size: 16px;
             margin: 10px;
         }
-        button:hover {
-            background-color: #27ae60;
-        }
         button:disabled {
             background-color: #95a5a6;
             cursor: not-allowed;
@@ -79,39 +74,19 @@
 <body>
     <div class="container">
         <h2>Token Transfer</h2>
-        <div id="status" class="status loading">Connecting to Web3...</div>
+        <div id="status" class="status loading">Initializing...</div>
         <div class="details" id="details"></div>
         <button id="sendButton" disabled onclick="sendTransaction()">Send Transaction</button>
         <button id="switchNetwork" style="display: none;" onclick="switchNetwork()">Switch Network</button>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.8.2/web3.min.js"></script>
     <script>
         let web3;
         let currentAccount;
-        let params = new URLSearchParams(window.location.search);
-        
-        // Check if MetaMask is installed
-        async function checkMetaMask() {
-            if (typeof window.ethereum !== 'undefined') {
-                try {
-                    // Create Web3 instance
-                    web3 = new Web3(window.ethereum);
-                    return true;
-                } catch (error) {
-                    console.error('Error initializing Web3:', error);
-                    updateStatus('Error initializing Web3: ' + error.message, 'error');
-                    return false;
-                }
-            } else {
-                updateStatus('MetaMask is not installed. Please install MetaMask to continue.', 'error');
-                return false;
-            }
-        }
+        const params = new URLSearchParams(window.location.search);
 
-        const requiredParams = ['chainId', 'tokenContract', 'to', 'amount', 'decimals'];
-        
-        // ERC20 Transfer function ABI
-        const erc20ABI = [{
+        const ABI = [{
             "constant": false,
             "inputs": [
                 {"name": "_to", "type": "address"},
@@ -122,66 +97,58 @@
             "type": "function"
         }];
 
-        const chainConfigs = {
+        const CHAIN_CONFIGS = {
             "1": {
                 name: "Ethereum Mainnet",
                 rpcUrls: ["https://mainnet.infura.io/v3/"],
-                nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+                nativeCurrency: { symbol: "ETH", decimals: 18 },
                 blockExplorerUrls: ["https://etherscan.io"]
             },
             "137": {
-                name: "Polygon Mainnet",
+                name: "Polygon",
                 rpcUrls: ["https://polygon-rpc.com"],
-                nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
+                nativeCurrency: { symbol: "MATIC", decimals: 18 },
                 blockExplorerUrls: ["https://polygonscan.com"]
             },
             "56": {
-                name: "BSC Mainnet",
+                name: "BSC",
                 rpcUrls: ["https://bsc-dataseed1.binance.org"],
-                nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
+                nativeCurrency: { symbol: "BNB", decimals: 18 },
                 blockExplorerUrls: ["https://bscscan.com"]
             }
         };
 
-        async function initialize() {
-            // Check MetaMask first
-            if (!await checkMetaMask()) {
-                return;
-            }
+        function updateStatus(message, type = 'loading') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
 
-            // Validate parameters
-            for (let param of requiredParams) {
-                if (!params.get(param)) {
-                    updateStatus(`Missing required parameter: ${param}`, 'error');
-                    return;
-                }
-            }
-
+        async function initWeb3() {
             try {
-                // Request account access
+                if (typeof window.ethereum === 'undefined') {
+                    throw new Error('MetaMask is not installed');
+                }
+
+                web3 = new Web3(window.ethereum);
                 const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
                 currentAccount = accounts[0];
 
-                // Check if we're on the correct network
                 const chainId = await web3.eth.getChainId();
-                const targetChainId = parseInt(params.get('chainId'));
-                
-                if (chainId !== targetChainId) {
+                const targetChainId = params.get('chainId');
+
+                if (chainId !== parseInt(targetChainId)) {
                     document.getElementById('switchNetwork').style.display = 'inline-block';
-                    updateStatus(`Please switch to ${chainConfigs[targetChainId].name}`, 'error');
+                    updateStatus(`Please switch to ${CHAIN_CONFIGS[targetChainId].name}`, 'error');
                     return;
                 }
 
-                // Enable the send button
+                displayTransactionDetails();
                 document.getElementById('sendButton').disabled = false;
                 updateStatus('Ready to send transaction', 'success');
-
-                // Display transaction details
-                displayTransactionDetails();
-
             } catch (error) {
-                console.error('Initialization error:', error);
-                updateStatus(`Error: ${error.message}`, 'error');
+                console.error('Init error:', error);
+                updateStatus(error.message, 'error');
             }
         }
 
@@ -190,124 +157,73 @@
             const to = params.get('to');
             const amount = parseInt(params.get('amount'), 16) / Math.pow(10, parseInt(params.get('decimals')));
             const chainId = params.get('chainId');
-            const chainConfig = chainConfigs[chainId];
 
-            const details = document.getElementById('details');
-            details.innerHTML = `
-                <div>Network: ${chainConfig.name}</div>
+            document.getElementById('details').innerHTML = `
+                <div>Network: ${CHAIN_CONFIGS[chainId].name}</div>
                 <div>Amount: ${amount}</div>
-                <div>Token Contract: <span class="address">${tokenContract}</span></div>
-                <div>Recipient: <span class="address">${to}</span></div>
+                <div>To: ${to}</div>
+                <div>Contract: ${tokenContract}</div>
             `;
         }
 
         async function switchNetwork() {
-            const targetChainId = params.get('chainId');
-            const chainConfig = chainConfigs[targetChainId];
-
             try {
+                const targetChainId = params.get('chainId');
                 await window.ethereum.request({
                     method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: Web3.utils.toHex(parseInt(targetChainId)) }],
+                    params: [{ chainId: '0x' + parseInt(targetChainId).toString(16) }],
                 });
-                // Reload page after successful switch
                 window.location.reload();
-            } catch (switchError) {
-                // This error code indicates that the chain has not been added to MetaMask
-                if (switchError.code === 4902) {
-                    try {
-                        await window.ethereum.request({
-                            method: 'wallet_addEthereumChain',
-                            params: [{
-                                chainId: Web3.utils.toHex(parseInt(targetChainId)),
-                                chainName: chainConfig.name,
-                                nativeCurrency: chainConfig.nativeCurrency,
-                                rpcUrls: chainConfig.rpcUrls,
-                                blockExplorerUrls: chainConfig.blockExplorerUrls
-                            }],
-                        });
-                        // Reload page after successful addition
-                        window.location.reload();
-                    } catch (addError) {
-                        updateStatus(`Error adding network: ${addError.message}`, 'error');
-                    }
-                } else {
-                    updateStatus(`Error switching network: ${switchError.message}`, 'error');
-                }
+            } catch (error) {
+                console.error('Switch network error:', error);
+                updateStatus(error.message, 'error');
             }
         }
 
         async function sendTransaction() {
             try {
                 document.getElementById('sendButton').disabled = true;
-                updateStatus('Preparing transaction...', 'loading');
+                updateStatus('Preparing transaction...');
 
                 const tokenContract = params.get('tokenContract');
                 const to = params.get('to');
                 const amount = params.get('amount');
                 
-                // Create contract instance
-                const contract = new web3.eth.Contract(erc20ABI, tokenContract);
-                
-                // Estimate gas
-                let gasEstimate;
-                try {
-                    gasEstimate = await contract.methods.transfer(to, '0x' + amount)
-                        .estimateGas({ from: currentAccount });
-                } catch (error) {
-                    console.error('Gas estimation error:', error);
-                    gasEstimate = 100000; // Fallback gas limit
-                }
-
-                // Get gas price
-                const gasPrice = await web3.eth.getGasPrice();
-
-                // Prepare transaction
+                const contract = new web3.eth.Contract(ABI, tokenContract);
                 const data = contract.methods.transfer(to, '0x' + amount).encodeABI();
 
-                // Send transaction
                 const tx = await window.ethereum.request({
                     method: 'eth_sendTransaction',
                     params: [{
                         from: currentAccount,
                         to: tokenContract,
-                        data: data,
-                        gas: web3.utils.toHex(Math.floor(gasEstimate * 1.1)), // Add 10% buffer
-                        gasPrice: web3.utils.toHex(gasPrice)
+                        data: data
                     }],
                 });
 
                 updateStatus(`Transaction sent! Hash: ${tx}`, 'success');
+
+                const chainId = params.get('chainId');
+                const explorerUrl = `${CHAIN_CONFIGS[chainId].blockExplorerUrls[0]}/tx/${tx}`;
                 
-                // Add link to block explorer
-                const chainConfig = chainConfigs[params.get('chainId')];
-                if (chainConfig && chainConfig.blockExplorerUrls) {
-                    const explorerUrl = `${chainConfig.blockExplorerUrls[0]}/tx/${tx}`;
-                    const link = document.createElement('a');
-                    link.href = explorerUrl;
-                    link.target = '_blank';
-                    link.textContent = 'View on Explorer';
-                    document.getElementById('status').appendChild(document.createElement('br'));
-                    document.getElementById('status').appendChild(link);
-                }
+                const link = document.createElement('a');
+                link.href = explorerUrl;
+                link.target = '_blank';
+                link.textContent = 'View on Explorer';
+                document.getElementById('status').appendChild(document.createElement('br'));
+                document.getElementById('status').appendChild(link);
 
             } catch (error) {
-                console.error('Transaction error:', error);
+                console.error('Send error:', error);
+                updateStatus(error.message, 'error');
                 document.getElementById('sendButton').disabled = false;
-                updateStatus(`Error: ${error.message}`, 'error');
             }
         }
 
-        function updateStatus(message, type) {
-            const status = document.getElementById('status');
-            status.textContent = message;
-            status.className = `status ${type}`;
-        }
+        // Initialize on page load
+        window.addEventListener('load', initWeb3);
 
-        // Initialize when page loads
-        window.addEventListener('load', initialize);
-
-        // Listen for account changes
+        // Listen for account/network changes
         if (window.ethereum) {
             window.ethereum.on('accountsChanged', () => window.location.reload());
             window.ethereum.on('chainChanged', () => window.location.reload());
