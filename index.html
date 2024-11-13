@@ -53,100 +53,158 @@
         .button.error {
             background: #e74c3c;
         }
-        #actions {
-            margin-top: 20px;
-            display: none;
-        }
     </style>
 </head>
 <body>
     <h1>Processing Transaction</h1>
     <div class="loader"></div>
-    <p id="status">Initializing...</p>
-    <div id="actions"></div>
+    <p id="status">Connecting to wallet...</p>
+    <div id="buttons"></div>
 
     <script>
         const status = document.getElementById('status');
-        const actions = document.getElementById('actions');
-        
-        function showError(message) {
-            console.error(message);
+        const buttons = document.getElementById('buttons');
+
+        // Helper functions
+        const showError = (message) => {
             status.innerHTML = `Error: ${message}`;
             status.className = 'error';
-        }
+        };
 
-        function addButton(text, onClick, isError = false) {
+        const addButton = (text, onClick, type = 'primary') => {
             const button = document.createElement('button');
-            button.className = `button${isError ? ' error' : ''}`;
+            button.className = `button ${type}`;
             button.textContent = text;
             button.onclick = onClick;
-            actions.appendChild(button);
-            actions.style.display = 'block';
-        }
+            buttons.appendChild(button);
+        };
 
         const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+        // ERC20 ABI for approve and allowance
+        const ERC20_ABI = [
+            {
+                "constant": true,
+                "inputs": [
+                    {"name": "owner", "type": "address"},
+                    {"name": "spender", "type": "address"}
+                ],
+                "name": "allowance",
+                "outputs": [{"name": "", "type": "uint256"}],
+                "payable": false,
+                "type": "function"
+            },
+            {
+                "constant": false,
+                "inputs": [
+                    {"name": "spender", "type": "address"},
+                    {"name": "amount", "type": "uint256"}
+                ],
+                "name": "approve",
+                "outputs": [{"name": "", "type": "bool"}],
+                "payable": false,
+                "type": "function"
+            }
+        ];
+
+        async function checkAllowance(tokenContract, owner, spender, amount) {
+            const contract = {
+                constant: true,
+                inputs: [{"name": "_owner", "type": "address"}, {"name": "_spender", "type": "address"}],
+                name: 'allowance',
+                outputs: [{"name": "", "type": "uint256"}],
+                payable: false,
+                stateMutability: 'view',
+                type: 'function'
+            };
+
+            const data = `0x${contract.name}${owner.slice(2).padStart(64, '0')}${spender.slice(2).padStart(64, '0')}`;
+            
+            const result = await ethereum.request({
+                method: 'eth_call',
+                params: [{ to: tokenContract, data }, 'latest']
+            });
+
+            return BigInt(result);
+        }
+
+        async function requestApproval(tokenContract, spender, amount, from) {
+            const approveData = `0x095ea7b3${spender.slice(2).padStart(64, '0')}${BigInt(amount).toString(16).padStart(64, '0')}`;
+            
+            const txHash = await ethereum.request({
+                method: 'eth_sendTransaction',
+                params: [{
+                    from,
+                    to: tokenContract,
+                    data: approveData
+                }]
+            });
+
+            return txHash;
+        }
+
         async function processTransaction() {
             try {
+                // Get URL parameters
+                const params = new URLSearchParams(window.location.search);
+                const chainId = params.get('chainId');
+                const tokenContract = params.get('tokenContract');
+                const to = params.get('to');
+                const amount = params.get('amount');
+                
+                console.log('Processing transaction with params:', { chainId, tokenContract, to, amount });
+
+                // Check for MetaMask
                 if (typeof window.ethereum === 'undefined') {
                     window.location.href = 'https://metamask.io/download/';
                     return;
                 }
 
-                // Get URL parameters
-                const params = new URLSearchParams(window.location.search);
-                const chainId = params.get('chainId');
-                const tokenContract = params.get('tokenContract');
-                const toAddress = params.get('to');
-                const amount = params.get('amount');
-
-                console.log('Parameters:', { chainId, tokenContract, toAddress, amount });
-
-                // Request account access
-                status.textContent = 'Connecting to MetaMask...';
+                // Connect wallet
+                status.textContent = 'Connecting to wallet...';
                 const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
-                const userAddress = accounts[0];
+                const account = accounts[0];
 
-                // Switch to correct network
+                // Switch network
                 status.textContent = 'Switching network...';
-                const targetChainId = `0x${parseInt(chainId).toString(16)}`;
+                const targetChainId = `0x${Number(chainId).toString(16)}`;
                 
                 try {
                     await ethereum.request({
                         method: 'wallet_switchEthereumChain',
-                        params: [{ chainId: targetChainId }],
+                        params: [{ chainId: targetChainId }]
                     });
                 } catch (error) {
                     if (error.code === 4902) {
-                        showError('Network not added to MetaMask. Please add it manually.');
+                        showError('Please add the network to MetaMask first');
                         return;
                     }
                     throw error;
                 }
 
-                // Wait for network switch
-                await sleep(1000);
-
-                // Prepare transaction
-                status.textContent = 'Preparing transaction...';
+                // Check allowance
+                status.textContent = 'Checking token approval...';
+                const currentAllowance = await checkAllowance(tokenContract, account, to, amount);
                 
-                // Create properly formatted data
-                const data = `0xa9059cbb${toAddress.slice(2).padStart(64, '0')}${amount.padStart(64, '0')}`;
-                
-                const txParams = {
-                    from: userAddress,
-                    to: tokenContract,
-                    data: data,
-                    value: '0x0'
-                };
-
-                console.log('Transaction params:', txParams);
+                if (currentAllowance < BigInt(amount)) {
+                    status.textContent = 'Approval needed. Please approve the transaction...';
+                    const approvalTx = await requestApproval(tokenContract, to, amount, account);
+                    status.textContent = 'Waiting for approval confirmation...';
+                    await sleep(2000);
+                }
 
                 // Send transaction
-                status.textContent = 'Please confirm the transaction in your wallet...';
+                status.textContent = 'Preparing transaction...';
+                const txData = `0xa9059cbb${to.slice(2).padStart(64, '0')}${amount.padStart(64, '0')}`;
+                
                 const txHash = await ethereum.request({
                     method: 'eth_sendTransaction',
-                    params: [txParams],
+                    params: [{
+                        from: account,
+                        to: tokenContract,
+                        data: txData,
+                        value: '0x0'
+                    }]
                 });
 
                 // Show success
@@ -157,22 +215,21 @@
                     '43114': 'https://snowtrace.io',
                     '8453': 'https://basescan.org'
                 };
-                
+
+                status.textContent = 'Transaction sent!';
                 const explorerUrl = `${explorers[chainId]}/tx/${txHash}`;
-                status.textContent = 'Transaction sent successfully!';
                 
                 addButton('View on Explorer', () => window.open(explorerUrl, '_blank'));
                 addButton('Return to Discord', () => window.close());
 
             } catch (error) {
-                console.error('Error:', error);
+                console.error('Transaction error:', error);
                 showError(error.message);
-                addButton('Try Again', () => window.location.reload(), true);
+                addButton('Try Again', () => window.location.reload(), 'error');
                 addButton('Return to Discord', () => window.close());
             }
         }
 
-        // Start when page loads
         window.onload = processTransaction;
     </script>
 </body>
