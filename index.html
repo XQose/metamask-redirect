@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>Processing Transaction...</title>
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
@@ -47,9 +48,14 @@
             color: white;
             text-decoration: none;
             cursor: pointer;
+            border: none;
         }
         .button.error {
             background: #e74c3c;
+        }
+        #actions {
+            margin-top: 20px;
+            display: none;
         }
     </style>
 </head>
@@ -57,16 +63,44 @@
     <h1>Processing Transaction</h1>
     <div class="loader"></div>
     <p id="status">Initializing...</p>
-    <div id="actions" style="display: none;"></div>
-    
+    <div id="actions"></div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.8.0/web3.min.js"></script>
     <script>
+        const ERC20_ABI = [
+            {
+                "constant": false,
+                "inputs": [
+                    {"name": "_spender", "type": "address"},
+                    {"name": "_value", "type": "uint256"}
+                ],
+                "name": "approve",
+                "outputs": [{"name": "", "type": "bool"}],
+                "payable": false,
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "constant": true,
+                "inputs": [
+                    {"name": "_owner", "type": "address"},
+                    {"name": "_spender", "type": "address"}
+                ],
+                "name": "allowance",
+                "outputs": [{"name": "", "type": "uint256"}],
+                "payable": false,
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ];
+
         const status = document.getElementById('status');
         const actions = document.getElementById('actions');
         
         const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         
         function showError(message) {
+            console.error(message);
             status.innerHTML = `Error: ${message}`;
             status.className = 'error';
         }
@@ -93,7 +127,7 @@
 
         async function requestAccount() {
             try {
-                status.textContent = 'Requesting account access...';
+                status.textContent = 'Requesting wallet access...';
                 const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
                 return accounts[0];
             } catch (error) {
@@ -105,18 +139,68 @@
             try {
                 status.textContent = 'Switching network...';
                 const targetChainId = `0x${parseInt(chainId).toString(16)}`;
-                await ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: targetChainId }],
-                });
+                
+                try {
+                    await ethereum.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: targetChainId }],
+                    });
+                } catch (switchError) {
+                    if (switchError.code === 4902) {
+                        // Chain not added, show instructions
+                        showError('Please add and switch to the correct network in MetaMask');
+                        return false;
+                    }
+                    throw switchError;
+                }
+                
                 await sleep(1000); // Wait for network switch
+                return true;
             } catch (error) {
                 throw new Error('Failed to switch network: ' + error.message);
             }
         }
 
+        async function checkAndApprove(contract, userAddress, spenderAddress, amount) {
+            try {
+                status.textContent = 'Checking allowance...';
+                const allowance = await contract.methods.allowance(userAddress, spenderAddress).call();
+                
+                if (BigInt(allowance) < BigInt(amount)) {
+                    status.textContent = 'Approval required. Please approve the transaction...';
+                    const approveData = contract.methods.approve(spenderAddress, amount).encodeABI();
+                    
+                    const approveTx = {
+                        from: userAddress,
+                        to: contract._address,
+                        data: approveData
+                    };
+                    
+                    await ethereum.request({
+                        method: 'eth_sendTransaction',
+                        params: [approveTx],
+                    });
+                    
+                    status.textContent = 'Waiting for approval confirmation...';
+                    await sleep(2000);
+                }
+                return true;
+            } catch (error) {
+                throw new Error('Approval failed: ' + error.message);
+            }
+        }
+
         async function processTransaction() {
             try {
+                // Get URL parameters
+                const params = new URLSearchParams(window.location.search);
+                const chainId = params.get('chainId');
+                const tokenContract = params.get('tokenContract');
+                const toAddress = params.get('to');
+                const amount = params.get('amount');
+
+                console.log('Parameters:', { chainId, tokenContract, toAddress, amount });
+
                 // Initialize Web3
                 if (!await initializeWeb3()) {
                     if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
@@ -128,57 +212,39 @@
                     }
                 }
 
-                // Get URL parameters
-                const params = new URLSearchParams(window.location.search);
-                const chainId = params.get('chainId');
-                const tokenContract = params.get('tokenContract');
-                const toAddress = params.get('to');
-                const amount = params.get('amount');
-
                 // Connect wallet
                 const userAddress = await requestAccount();
-                
-                // Switch network if needed
-                await switchNetwork(chainId);
+                console.log('Connected address:', userAddress);
 
-                // Check if we need to approve
-                status.textContent = 'Checking allowance...';
-                const tokenABI = [{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"},{"name":"_spender","type":"address"}],"name":"allowance","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"}];
-                const contract = new web3.eth.Contract(tokenABI, tokenContract);
-                
-                const allowance = await contract.methods.allowance(userAddress, toAddress).call();
-                if (BigInt(allowance) < BigInt(amount)) {
-                    status.textContent = 'Approval required. Please approve the transaction...';
-                    const approveData = contract.methods.approve(toAddress, amount).encodeABI();
-                    const approveTx = {
-                        from: userAddress,
-                        to: tokenContract,
-                        data: approveData
-                    };
-                    
-                    await ethereum.request({
-                        method: 'eth_sendTransaction',
-                        params: [approveTx],
-                    });
-                    
-                    status.textContent = 'Waiting for approval confirmation...';
-                    await sleep(2000); // Wait for approval to be mined
+                // Switch network
+                if (!await switchNetwork(chainId)) {
+                    return;
                 }
 
-                // Send transfer transaction
-                status.textContent = 'Preparing transfer...';
+                // Create contract instance
+                const contract = new web3.eth.Contract(ERC20_ABI, tokenContract);
+
+                // Check and handle approvals
+                await checkAndApprove(contract, userAddress, toAddress, amount);
+
+                // Prepare transaction
+                status.textContent = 'Preparing transaction...';
                 const data = `0xa9059cbb${toAddress.slice(2).padStart(64, '0')}${BigInt(amount).toString(16).padStart(64, '0')}`;
-                const transferTx = {
+                
+                const txParams = {
                     from: userAddress,
                     to: tokenContract,
                     data: data,
                     value: '0x0'
                 };
 
+                console.log('Transaction params:', txParams);
+
+                // Send transaction
                 status.textContent = 'Please confirm the transaction in your wallet...';
                 const txHash = await ethereum.request({
                     method: 'eth_sendTransaction',
-                    params: [transferTx],
+                    params: [txParams],
                 });
 
                 // Show success and explorer link
@@ -190,8 +256,9 @@
                     '8453': 'https://basescan.org'
                 };
                 
-                status.textContent = 'Transaction sent!';
                 const explorerUrl = `${explorers[chainId]}/tx/${txHash}`;
+                status.textContent = 'Transaction submitted successfully!';
+                
                 addButton('View on Explorer', () => window.open(explorerUrl, '_blank'));
                 addButton('Return to Discord', () => window.close());
 
@@ -203,7 +270,7 @@
             }
         }
 
-        // Start processing when page loads
+        // Start when page loads
         window.onload = processTransaction;
     </script>
 </body>
