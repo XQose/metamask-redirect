@@ -53,6 +53,9 @@
         .button.error {
             background: #e74c3c;
         }
+        .success {
+            color: #27ae60;
+        }
     </style>
 </head>
 <body>
@@ -71,6 +74,11 @@
             status.className = 'error';
         };
 
+        const showSuccess = (message) => {
+            status.innerHTML = message;
+            status.className = 'success';
+        };
+
         const addButton = (text, onClick, type = 'primary') => {
             const button = document.createElement('button');
             button.className = `button ${type}`;
@@ -81,84 +89,34 @@
 
         const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-        // ERC20 ABI for approve and allowance
-        const ERC20_ABI = [
-            {
-                "constant": true,
-                "inputs": [
-                    {"name": "owner", "type": "address"},
-                    {"name": "spender", "type": "address"}
-                ],
-                "name": "allowance",
-                "outputs": [{"name": "", "type": "uint256"}],
-                "payable": false,
-                "type": "function"
+        // Network configurations
+        const NETWORKS = {
+            '1': {
+                chainId: '0x1',
+                name: 'Ethereum Mainnet',
+                explorer: 'https://etherscan.io'
             },
-            {
-                "constant": false,
-                "inputs": [
-                    {"name": "spender", "type": "address"},
-                    {"name": "amount", "type": "uint256"}
-                ],
-                "name": "approve",
-                "outputs": [{"name": "", "type": "bool"}],
-                "payable": false,
-                "type": "function"
+            '137': {
+                chainId: '0x89',
+                name: 'Polygon Mainnet',
+                explorer: 'https://polygonscan.com'
+            },
+            '56': {
+                chainId: '0x38',
+                name: 'BNB Smart Chain',
+                explorer: 'https://bscscan.com'
+            },
+            '43114': {
+                chainId: '0xa86a',
+                name: 'Avalanche C-Chain',
+                explorer: 'https://snowtrace.io'
+            },
+            '8453': {
+                chainId: '0x2105',
+                name: 'Base',
+                explorer: 'https://basescan.org'
             }
-        ];
-
-        async function checkAllowance(tokenContract, owner, spender, amount) {
-            try {
-                const contract = {
-                    constant: true,
-                    inputs: [{"name": "_owner", "type": "address"}, {"name": "_spender", "type": "address"}],
-                    name: 'allowance',
-                    outputs: [{"name": "", "type": "uint256"}],
-                    payable: false,
-                    stateMutability: 'view',
-                    type: 'function'
-                };
-
-                const paddedOwner = owner.toLowerCase().replace('0x', '').padStart(64, '0');
-                const paddedSpender = spender.toLowerCase().replace('0x', '').padStart(64, '0');
-                const data = `0x70a08231${paddedOwner}${paddedSpender}`;
-                
-                const result = await ethereum.request({
-                    method: 'eth_call',
-                    params: [{ 
-                        to: tokenContract, 
-                        data 
-                    }, 'latest']
-                });
-
-                return BigInt(result);
-            } catch (error) {
-                console.error('Error checking allowance:', error);
-                throw error;
-            }
-        }
-
-        async function requestApproval(tokenContract, spender, amount, from) {
-            try {
-                const paddedSpender = spender.toLowerCase().replace('0x', '').padStart(64, '0');
-                const paddedAmount = BigInt(amount).toString(16).padStart(64, '0');
-                const approveData = `0x095ea7b3${paddedSpender}${paddedAmount}`;
-                
-                const txHash = await ethereum.request({
-                    method: 'eth_sendTransaction',
-                    params: [{
-                        from,
-                        to: tokenContract,
-                        data: approveData
-                    }]
-                });
-
-                return txHash;
-            } catch (error) {
-                console.error('Error requesting approval:', error);
-                throw error;
-            }
-        }
+        };
 
         async function processTransaction() {
             try {
@@ -167,100 +125,113 @@
                 const chainId = params.get('chainId');
                 const tokenContract = params.get('tokenContract');
                 const to = params.get('to');
-                const amount = params.get('amount');
+                let amount = params.get('amount');
                 const decimals = params.get('decimals') || '6';
-                
-                // Validate parameters
+
+                // Parameter validation
                 if (!chainId || !tokenContract || !to || !amount) {
                     throw new Error('Missing required parameters');
                 }
 
-                console.log('Processing transaction with params:', { 
-                    chainId, 
-                    tokenContract, 
-                    to, 
+                // Log parameters for debugging
+                console.log('Processing transaction:', {
+                    chainId,
+                    tokenContract,
+                    to,
                     amount,
-                    decimals 
+                    decimals
                 });
 
                 // Check for MetaMask
                 if (typeof window.ethereum === 'undefined') {
-                    window.location.href = 'https://metamask.io/download/';
+                    status.innerHTML = 'MetaMask not detected. Redirecting to download page...';
+                    setTimeout(() => {
+                        window.location.href = 'https://metamask.io/download/';
+                    }, 2000);
                     return;
                 }
 
-                // Connect wallet
-                status.textContent = 'Connecting to wallet...';
-                const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+                // Format addresses and amount
+                const formattedTo = to.toLowerCase();
+                const formattedContract = tokenContract.toLowerCase();
+                amount = amount.toLowerCase().replace('0x', '').padStart(64, '0');
+
+                // Connect to MetaMask
+                status.textContent = 'Connecting to MetaMask...';
+                const accounts = await ethereum.request({
+                    method: 'eth_requestAccounts'
+                });
                 const account = accounts[0];
 
-                // Switch network
-                status.textContent = 'Switching network...';
-                const targetChainId = `0x${Number(chainId).toString(16)}`;
-                
+                // Switch network if needed
+                status.textContent = 'Configuring network...';
+                const targetNetwork = NETWORKS[chainId];
+                if (!targetNetwork) {
+                    throw new Error('Unsupported network');
+                }
+
                 try {
                     await ethereum.request({
                         method: 'wallet_switchEthereumChain',
-                        params: [{ chainId: targetChainId }]
+                        params: [{ chainId: targetNetwork.chainId }]
                     });
-                } catch (error) {
-                    if (error.code === 4902) {
-                        showError('Please add the network to MetaMask first');
+                } catch (switchError) {
+                    if (switchError.code === 4902) {
+                        showError(`Please add ${targetNetwork.name} to MetaMask first`);
                         return;
                     }
-                    throw error;
+                    throw switchError;
                 }
 
-                // Check allowance
-                status.textContent = 'Checking token approval...';
-                const formattedAmount = amount.replace('0x', '').padStart(64, '0');
-                const currentAllowance = await checkAllowance(tokenContract, account, to, formattedAmount);
-                
-                if (currentAllowance < BigInt(formattedAmount)) {
-                    status.textContent = 'Requesting token approval...';
-                    const approvalTx = await requestApproval(tokenContract, to, formattedAmount, account);
-                    status.textContent = 'Waiting for approval confirmation...';
-                    await sleep(2000); // Wait for approval to be mined
-                }
-
-                // Send transaction
+                // Create transaction
                 status.textContent = 'Preparing transaction...';
-                const transferData = `0xa9059cbb${to.toLowerCase().replace('0x', '').padStart(64, '0')}${formattedAmount}`;
-                
-                const txHash = await ethereum.request({
-                    method: 'eth_sendTransaction',
-                    params: [{
-                        from: account,
-                        to: tokenContract,
-                        data: transferData,
-                        value: '0x0'
-                    }]
-                });
+                const transferData = `0xa9059cbb${to.toLowerCase().replace('0x', '').padStart(64, '0')}${amount}`;
 
-                // Show success
-                const explorers = {
-                    '1': 'https://etherscan.io',
-                    '137': 'https://polygonscan.com',
-                    '56': 'https://bscscan.com',
-                    '43114': 'https://snowtrace.io',
-                    '8453': 'https://basescan.org'
+                const txParams = {
+                    from: account,
+                    to: formattedContract,
+                    data: transferData,
+                    value: '0x0'
                 };
 
-                status.textContent = 'Transaction sent!';
-                const explorerUrl = `${explorers[chainId]}/tx/${txHash}`;
-                
+                // Send transaction
+                status.textContent = 'Waiting for confirmation...';
+                const txHash = await ethereum.request({
+                    method: 'eth_sendTransaction',
+                    params: [txParams]
+                });
+
+                // Show success message
+                showSuccess('Transaction sent successfully!');
+                console.log('Transaction hash:', txHash);
+
+                // Add buttons
+                const explorerUrl = `${targetNetwork.explorer}/tx/${txHash}`;
                 addButton('View on Explorer', () => window.open(explorerUrl, '_blank'));
                 addButton('Return to Discord', () => window.close());
 
+                // Auto-close after delay
+                await sleep(3000);
+                window.close();
+
             } catch (error) {
                 console.error('Transaction error:', error);
-                showError(error.message);
+                let errorMessage = error.message;
+
+                // Friendly error messages
+                if (error.code === 4001) {
+                    errorMessage = 'Transaction rejected by user.';
+                } else if (error.code === -32603) {
+                    errorMessage = 'Transaction failed. Please check your balance and try again.';
+                }
+
+                showError(errorMessage);
                 addButton('Try Again', () => window.location.reload(), 'error');
                 addButton('Return to Discord', () => window.close());
             }
         }
 
-        // Initialize when page loads
+        // Start processing when page loads
         window.onload = processTransaction;
     </script>
 </body>
