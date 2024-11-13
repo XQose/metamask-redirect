@@ -48,18 +48,17 @@
             const toAddress = getParam('to');
             const amount = getParam('amount');
             
-            // Construct MetaMask deep link
-            const metamaskUrl = `ethereum:${tokenContract}/transfer?address=${toAddress}&amount=${amount}&chainId=${chainId}`;
+            // Try direct MetaMask deep link first
+            const metamaskUrl = `https://metamask.app.link/send/${tokenContract}@${chainId}/transfer?address=${toAddress}&amount=${amount}`;
             
-            // Try deep linking to MetaMask
+            // Redirect to MetaMask
             window.location.href = metamaskUrl;
             
-            // Fallback after small delay
+            // If after 1 second we're still here, try alternative link for mobile
             setTimeout(() => {
-                if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-                    window.location.href = `https://metamask.app.link/send/${tokenContract}@${chainId}/transfer?address=${toAddress}&amount=${amount}`;
-                }
-            }, 500);
+                const altMetamaskUrl = `metamask://send/${tokenContract}@${chainId}/transfer?address=${toAddress}&amount=${amount}`;
+                window.location.href = altMetamaskUrl;
+            }, 1000);
         }
 
         // Start redirect when page loads
