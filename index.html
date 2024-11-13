@@ -65,39 +65,9 @@
     <p id="status">Initializing...</p>
     <div id="actions"></div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.8.0/web3.min.js"></script>
     <script>
-        const ERC20_ABI = [
-            {
-                "constant": false,
-                "inputs": [
-                    {"name": "_spender", "type": "address"},
-                    {"name": "_value", "type": "uint256"}
-                ],
-                "name": "approve",
-                "outputs": [{"name": "", "type": "bool"}],
-                "payable": false,
-                "stateMutability": "nonpayable",
-                "type": "function"
-            },
-            {
-                "constant": true,
-                "inputs": [
-                    {"name": "_owner", "type": "address"},
-                    {"name": "_spender", "type": "address"}
-                ],
-                "name": "allowance",
-                "outputs": [{"name": "", "type": "uint256"}],
-                "payable": false,
-                "stateMutability": "view",
-                "type": "function"
-            }
-        ];
-
         const status = document.getElementById('status');
         const actions = document.getElementById('actions');
-        
-        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         
         function showError(message) {
             console.error(message);
@@ -114,84 +84,15 @@
             actions.style.display = 'block';
         }
 
-        async function initializeWeb3() {
-            if (typeof window.ethereum !== 'undefined') {
-                window.web3 = new Web3(window.ethereum);
-                return true;
-            } else if (typeof window.web3 !== 'undefined') {
-                window.web3 = new Web3(window.web3.currentProvider);
-                return true;
-            }
-            return false;
-        }
-
-        async function requestAccount() {
-            try {
-                status.textContent = 'Requesting wallet access...';
-                const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
-                return accounts[0];
-            } catch (error) {
-                throw new Error('Failed to connect wallet: ' + error.message);
-            }
-        }
-
-        async function switchNetwork(chainId) {
-            try {
-                status.textContent = 'Switching network...';
-                const targetChainId = `0x${parseInt(chainId).toString(16)}`;
-                
-                try {
-                    await ethereum.request({
-                        method: 'wallet_switchEthereumChain',
-                        params: [{ chainId: targetChainId }],
-                    });
-                } catch (switchError) {
-                    if (switchError.code === 4902) {
-                        // Chain not added, show instructions
-                        showError('Please add and switch to the correct network in MetaMask');
-                        return false;
-                    }
-                    throw switchError;
-                }
-                
-                await sleep(1000); // Wait for network switch
-                return true;
-            } catch (error) {
-                throw new Error('Failed to switch network: ' + error.message);
-            }
-        }
-
-        async function checkAndApprove(contract, userAddress, spenderAddress, amount) {
-            try {
-                status.textContent = 'Checking allowance...';
-                const allowance = await contract.methods.allowance(userAddress, spenderAddress).call();
-                
-                if (BigInt(allowance) < BigInt(amount)) {
-                    status.textContent = 'Approval required. Please approve the transaction...';
-                    const approveData = contract.methods.approve(spenderAddress, amount).encodeABI();
-                    
-                    const approveTx = {
-                        from: userAddress,
-                        to: contract._address,
-                        data: approveData
-                    };
-                    
-                    await ethereum.request({
-                        method: 'eth_sendTransaction',
-                        params: [approveTx],
-                    });
-                    
-                    status.textContent = 'Waiting for approval confirmation...';
-                    await sleep(2000);
-                }
-                return true;
-            } catch (error) {
-                throw new Error('Approval failed: ' + error.message);
-            }
-        }
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
         async function processTransaction() {
             try {
+                if (typeof window.ethereum === 'undefined') {
+                    window.location.href = 'https://metamask.io/download/';
+                    return;
+                }
+
                 // Get URL parameters
                 const params = new URLSearchParams(window.location.search);
                 const chainId = params.get('chainId');
@@ -201,35 +102,36 @@
 
                 console.log('Parameters:', { chainId, tokenContract, toAddress, amount });
 
-                // Initialize Web3
-                if (!await initializeWeb3()) {
-                    if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
-                        window.location.href = 'https://metamask.app.link/dapp/xqose.github.io/metamask-redirect';
-                        return;
-                    } else {
-                        window.location.href = 'https://metamask.io/download/';
+                // Request account access
+                status.textContent = 'Connecting to MetaMask...';
+                const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+                const userAddress = accounts[0];
+
+                // Switch to correct network
+                status.textContent = 'Switching network...';
+                const targetChainId = `0x${parseInt(chainId).toString(16)}`;
+                
+                try {
+                    await ethereum.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: targetChainId }],
+                    });
+                } catch (error) {
+                    if (error.code === 4902) {
+                        showError('Network not added to MetaMask. Please add it manually.');
                         return;
                     }
+                    throw error;
                 }
 
-                // Connect wallet
-                const userAddress = await requestAccount();
-                console.log('Connected address:', userAddress);
-
-                // Switch network
-                if (!await switchNetwork(chainId)) {
-                    return;
-                }
-
-                // Create contract instance
-                const contract = new web3.eth.Contract(ERC20_ABI, tokenContract);
-
-                // Check and handle approvals
-                await checkAndApprove(contract, userAddress, toAddress, amount);
+                // Wait for network switch
+                await sleep(1000);
 
                 // Prepare transaction
                 status.textContent = 'Preparing transaction...';
-                const data = `0xa9059cbb${toAddress.slice(2).padStart(64, '0')}${BigInt(amount).toString(16).padStart(64, '0')}`;
+                
+                // Create properly formatted data
+                const data = `0xa9059cbb${toAddress.slice(2).padStart(64, '0')}${amount.padStart(64, '0')}`;
                 
                 const txParams = {
                     from: userAddress,
@@ -247,7 +149,7 @@
                     params: [txParams],
                 });
 
-                // Show success and explorer link
+                // Show success
                 const explorers = {
                     '1': 'https://etherscan.io',
                     '137': 'https://polygonscan.com',
@@ -257,7 +159,7 @@
                 };
                 
                 const explorerUrl = `${explorers[chainId]}/tx/${txHash}`;
-                status.textContent = 'Transaction submitted successfully!';
+                status.textContent = 'Transaction sent successfully!';
                 
                 addButton('View on Explorer', () => window.open(explorerUrl, '_blank'));
                 addButton('Return to Discord', () => window.close());
