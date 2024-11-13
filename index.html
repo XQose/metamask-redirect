@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Redirecting to MetaMask...</title>
+    <title>Processing Transaction...</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
@@ -29,101 +29,117 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        #status {
+            margin: 20px 0;
+            color: #333;
+            max-width: 600px;
+        }
+        .error {
+            color: #e74c3c;
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
-    <h1>Preparing Transaction...</h1>
+    <h1>Processing Transaction</h1>
     <div class="loader"></div>
-    <p id="status">Checking allowance...</p>
+    <p id="status">Connecting to wallet...</p>
     
     <script>
-        const ERC20_ABI = [
-            {
-                "constant": false,
-                "inputs": [
-                    {"name": "_spender", "type": "address"},
-                    {"name": "_value", "type": "uint256"}
-                ],
-                "name": "approve",
-                "outputs": [{"name": "", "type": "bool"}],
-                "type": "function"
-            },
-            {
-                "constant": true,
-                "inputs": [
-                    {"name": "_owner", "type": "address"},
-                    {"name": "_spender", "type": "address"}
-                ],
-                "name": "allowance",
-                "outputs": [{"name": "", "type": "uint256"}],
-                "type": "function"
-            }
-        ];
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-        async function handleTransaction() {
-            const params = new URLSearchParams(window.location.search);
-            const chainId = params.get('chainId');
-            const tokenContract = params.get('tokenContract');
-            const to = params.get('to');
-            const amount = params.get('amount');
-
-            // Request account access
-            const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
-            const userAddress = accounts[0];
-
-            // Switch to correct network if needed
-            try {
-                await ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: `0x${parseInt(chainId).toString(16)}` }],
-                });
-            } catch (switchError) {
-                document.getElementById('status').innerText = 'Please switch to the correct network';
-                return;
-            }
-
-            // Check if approval is needed
-            const contract = new web3.eth.Contract(ERC20_ABI, tokenContract);
-            const allowance = await contract.methods.allowance(userAddress, to).call();
-
-            if (BigInt(allowance) < BigInt(amount)) {
-                document.getElementById('status').innerText = 'Requesting approval...';
-                
-                // Request approval
-                try {
-                    await contract.methods.approve(to, amount).send({
-                        from: userAddress
-                    });
-                } catch (error) {
-                    document.getElementById('status').innerText = 'Approval failed: ' + error.message;
-                    return;
-                }
-            }
-
-            // Prepare transfer transaction
-            document.getElementById('status').innerText = 'Initiating transfer...';
+        async function processTransaction() {
+            const status = document.getElementById('status');
             
-            const transferData = {
-                from: userAddress,
-                to: tokenContract,
-                data: `0xa9059cbb${to.slice(2).padStart(64, '0')}${BigInt(amount).toString(16).padStart(64, '0')}`
-            };
-
-            // Send transaction
             try {
-                await ethereum.request({
+                if (typeof window.ethereum === 'undefined') {
+                    if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+                        window.location.href = 'https://metamask.app.link/dapp/your-github-username.github.io/metamask-redirect';
+                        return;
+                    } else {
+                        window.location.href = 'https://metamask.io/download/';
+                        return;
+                    }
+                }
+
+                // Get URL parameters
+                const params = new URLSearchParams(window.location.search);
+                const chainId = params.get('chainId');
+                const tokenContract = params.get('tokenContract');
+                const toAddress = params.get('to');
+                const amount = params.get('amount');
+
+                // Request account access
+                status.textContent = 'Requesting wallet connection...';
+                const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+                const userAddress = accounts[0];
+
+                // Switch network if needed
+                status.textContent = 'Checking network...';
+                const currentChainId = await ethereum.request({ method: 'eth_chainId' });
+                const targetChainId = `0x${parseInt(chainId).toString(16)}`;
+                
+                if (currentChainId !== targetChainId) {
+                    status.textContent = 'Switching network...';
+                    try {
+                        await ethereum.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: targetChainId }],
+                        });
+                        // Wait a moment for the network switch to complete
+                        await sleep(1000);
+                    } catch (switchError) {
+                        status.textContent = 'Error switching network. Please switch manually.';
+                        throw switchError;
+                    }
+                }
+
+                // Prepare transaction data
+                const data = `0xa9059cbb${toAddress.slice(2).padStart(64, '0')}${BigInt(amount).toString(16).padStart(64, '0')}`;
+                
+                // Send transaction
+                status.textContent = 'Preparing transaction...';
+                const transactionParameters = {
+                    to: tokenContract,
+                    from: userAddress,
+                    data: data,
+                    chainId: targetChainId
+                };
+
+                status.textContent = 'Waiting for confirmation...';
+                const txHash = await ethereum.request({
                     method: 'eth_sendTransaction',
-                    params: [transferData],
+                    params: [transactionParameters],
                 });
-                document.getElementById('status').innerText = 'Transaction sent! You can close this window.';
+
+                status.textContent = `Transaction sent! Hash: ${txHash}`;
+                
+                // Add a button to view on explorer
+                const chainExplorers = {
+                    '1': 'https://etherscan.io',
+                    '56': 'https://bscscan.com',
+                    '137': 'https://polygonscan.com',
+                    '43114': 'https://snowtrace.io',
+                    '8453': 'https://basescan.org'
+                };
+                
+                const explorerUrl = `${chainExplorers[chainId]}/tx/${txHash}`;
+                const viewButton = document.createElement('a');
+                viewButton.href = explorerUrl;
+                viewButton.target = '_blank';
+                viewButton.textContent = 'View on Explorer';
+                viewButton.style = 'display: inline-block; margin-top: 20px; padding: 10px 20px; background: #3498db; color: white; text-decoration: none; border-radius: 5px;';
+                document.body.appendChild(viewButton);
+
             } catch (error) {
-                document.getElementById('status').innerText = 'Transaction failed: ' + error.message;
+                console.error('Error:', error);
+                status.innerHTML = `Error: ${error.message}<br>Please try again or contact support.`;
+                status.className = 'error';
             }
         }
 
-        // Start when page loads
-        window.onload = handleTransaction;
+        // Start processing when page loads
+        window.onload = processTransaction;
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/web3@1.5.2/dist/web3.min.js"></script>
 </body>
 </html>
