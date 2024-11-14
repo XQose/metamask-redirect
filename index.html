@@ -9,12 +9,15 @@
     <meta name="format-detection" content="telephone=no">
     <meta name="format-detection" content="date=no">
     <meta name="format-detection" content="address=no">
-    <!-- Force MetaMask detection -->
     <meta name="web3-support" content="metamask">
-    
-    <!-- Load Web3 -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.3.0/web3.min.js"></script>
-    
+
+    <!-- MetaMask and Web3 dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.3.0/web3.min.js" 
+            integrity="sha512-uz3qk2k5WzvLKQ4w6qELXpR4SrCKFnTYHXJA6PVvHG9H7dXnP7PHjEhxNOghQ3PRNZJEaQWg7lsJxzJvR0JQEg==" 
+            crossorigin="anonymous" 
+            referrerpolicy="no-referrer">
+    </script>
+
     <style>
         * { 
             margin: 0; 
@@ -183,41 +186,6 @@
             font-family: monospace;
         }
         
-        a { 
-            color: #3182ce; 
-            text-decoration: none;
-        }
-        
-        a:hover { 
-            text-decoration: underline; 
-        }
-
-        .metamask-button {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            background-color: #f6851b;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 500;
-            margin: 16px 0;
-            border: none;
-            width: 100%;
-            transition: background-color 0.2s;
-        }
-
-        .metamask-button:hover {
-            background-color: #e2761b;
-        }
-
-        .metamask-logo {
-            width: 24px;
-            height: 24px;
-        }
-
         .error-container {
             display: none;
             margin-top: 16px;
@@ -226,6 +194,28 @@
             border: 1px solid #feb2b2;
             border-radius: 6px;
             color: #c53030;
+        }
+
+        .retry-button {
+            background-color: #48bb78;
+            margin-top: 16px;
+        }
+
+        .retry-button:hover {
+            background-color: #38a169;
+        }
+
+        .metamask-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background-color: #f6851b;
+            margin-top: 16px;
+        }
+
+        .metamask-button:hover {
+            background-color: #e67e22;
         }
 
         @media (max-width: 480px) {
@@ -258,6 +248,10 @@
     </div>
 
     <script>
+        // Initialize Web3 instance
+        let web3;
+
+        // Chain configurations with complete network details
         const chainConfigs = {
             "1": {
                 name: "Ethereum",
@@ -327,12 +321,13 @@
             }
         };
 
-        // ERC20 Transfer function signature
         const TRANSFER_FUNCTION_SIGNATURE = '0xa9059cbb';
+        const MAX_RETRY_COUNT = 3;
+        let retryCount = 0;
 
-        // Utility functions
         function padHex(hex) {
-            return hex.startsWith('0x') ? hex.slice(2).padStart(64, '0') : hex.padStart(64, '0');
+            hex = hex.replace('0x', '');
+            return hex.padStart(64, '0');
         }
 
         function createTransferData(to, amount) {
@@ -341,9 +336,8 @@
                    padHex(amount);               // amount parameter
         }
 
-        async function getGasPrice(web3, chainId) {
+        async function getGasPrice(chainId) {
             try {
-                // For EIP-1559 compatible chains
                 if (['1', '137', '8453'].includes(chainId)) {
                     const feeData = await web3.eth.getFeeData();
                     return {
@@ -351,7 +345,6 @@
                         maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
                     };
                 } else {
-                    // Legacy gas price
                     const gasPrice = await web3.eth.getGasPrice();
                     return { gasPrice };
                 }
@@ -361,16 +354,86 @@
             }
         }
 
-        async function estimateGas(web3, transferData, chainConfig) {
+        async function initializeTransfer() {
             try {
-                const gasEstimate = await web3.eth.estimateGas(transferData);
-                return Math.min(
-                    Math.ceil(gasEstimate * 1.2), // 20% buffer
-                    chainConfig.maxGasLimit
+                if (typeof window.ethereum === 'undefined') {
+                    throw new Error('MetaMask is not installed');
+                }
+
+                web3 = new Web3(window.ethereum);
+
+                const params = new URLSearchParams(window.location.search);
+                const chainId = params.get('chainId');
+                const tokenContract = params.get('tokenContract');
+                const to = params.get('to');
+                const amount = params.get('amount');
+                const decimals = parseInt(params.get('decimals') || '6');
+
+                updateStatus('Connecting to MetaMask...', 'loading');
+                displayTransactionDetails(chainId, tokenContract, to, amount, decimals);
+
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                await switchNetwork(chainId);
+
+                const accounts = await web3.eth.getAccounts();
+                const from = accounts[0];
+
+                updateStatus('Preparing transaction...', 'loading');
+
+                const transferData = createTransferData(to, amount);
+
+                const txParams = {
+                    from: from,
+                    to: tokenContract,
+                    data: '0x' + transferData,
+                    value: '0x0'
+                };
+
+                // Gas estimation with fallback
+                try {
+                    const gasEstimate = await web3.eth.estimateGas(txParams);
+                    txParams.gas = '0x' + Math.ceil(gasEstimate * 1.1).toString(16);
+                } catch (error) {
+                    console.warn('Gas estimation failed:', error);
+                    txParams.gas = '0x' + chainConfigs[chainId].defaultGasLimit.toString(16);
+                }
+
+                // Get gas price based on network type
+                const gasPriceData = await getGasPrice(chainId);
+                if (gasPriceData.maxFeePerGas) {
+                    txParams.maxFeePerGas = gasPriceData.maxFeePerGas;
+                    txParams.maxPriorityFeePerGas = gasPriceData.maxPriorityFeePerGas;
+                } else {
+                    txParams.gasPrice = gasPriceData.gasPrice;
+                }
+
+                // Display gas estimate
+                const gasCost = web3.utils.fromWei(
+                    (gasPriceData.maxFeePerGas || gasPriceData.gasPrice) * BigInt(txParams.gas),
+                    'ether'
                 );
+
+                document.getElementById('gas-estimate').innerHTML = `
+                    <div>Estimated Gas Cost: ${gasCost} ${chainConfigs[chainId].nativeCurrency.symbol}</div>
+                `;
+
+                updateStatus('Waiting for confirmation...', 'loading');
+                const txHash = await window.ethereum.request({
+                    method: 'eth_sendTransaction',
+                    params: [txParams]
+                });
+
+                const explorerUrl = `${chainConfigs[chainId].blockExplorer}/tx/${txHash}`;
+                updateStatus(
+                    `Transaction submitted! View on explorer: <a href="${explorerUrl}" target="_blank">${txHash.slice(0,10)}...</a>`,
+                    'success'
+                );
+
+                trackTransaction(txHash, chainId);
+
             } catch (error) {
-                console.error('Gas estimation failed:', error);
-                return chainConfig.defaultGasLimit;
+                console.error('Error:', error);
+                handleError(error);
             }
         }
 
@@ -397,125 +460,19 @@
             }
         }
 
-        async function initializeTransfer() {
-            // Parse URL parameters
-            const params = new URLSearchParams(window.location.search);
-            const chainId = params.get('chainId');
-            const tokenContract = params.get('tokenContract');
-            const to = params.get('to');
-            const amount = params.get('amount');
-            const decimals = parseInt(params.get('decimals') || '6');
-
-            try {
-                // Check for MetaMask
-                if (typeof window.ethereum === 'undefined') {
-                    throw new Error('MetaMask is not installed');
-                }
-
-                // Get chain configuration
-                const chainConfig = chainConfigs[chainId];
-                if (!chainConfig) {
-                    throw new Error('Unsupported chain');
-                }
-
-                updateStatus('Connecting to MetaMask...', 'loading');
-                displayTransactionDetails(chainId, tokenContract, to, amount, decimals);
-
-                // Request account access
-                const accounts = await window.ethereum.request({ 
-                    method: 'eth_requestAccounts' 
-                });
-                const currentAccount = accounts[0];
-
-                // Switch to correct network
-                updateStatus('Switching network...', 'loading');
-                await switchNetwork(chainId);
-
-                // Initialize Web3
-                const web3 = new Web3(window.ethereum);
-
-                // Prepare transaction data
-                const transferData = createTransferData(to, amount);
-                
-                // Prepare transaction parameters
-                const txParams = {
-                    from: currentAccount,
-                    to: tokenContract,
-                    data: '0x' + transferData
-                };
-
-                // Get gas price and estimate gas
-                updateStatus('Estimating gas...', 'loading');
-                const [gasPrice, gasLimit] = await Promise.all([
-                    getGasPrice(web3, chainId),
-                    estimateGas(web3, txParams, chainConfig)
-                ]);
-
-                // Add gas parameters to transaction
-                if (gasPrice.maxFeePerGas) {
-                    // EIP-1559 transaction
-                    txParams.maxFeePerGas = gasPrice.maxFeePerGas;
-                    txParams.maxPriorityFeePerGas = gasPrice.maxPriorityFeePerGas;
-                } else {
-                    // Legacy transaction
-                    txParams.gasPrice = gasPrice.gasPrice;
-                }
-                txParams.gas = gasLimit;
-
-                // Display gas estimate
-                const gasCost = web3.utils.fromWei(
-                    (gasPrice.maxFeePerGas || gasPrice.gasPrice) * BigInt(gasLimit),
-                    'ether'
-                );
-                document.getElementById('gas-estimate').innerHTML = `
-                    <table>
-                        <tr>
-                            <td>Estimated Gas Limit:</td>
-                            <td>${gasLimit}</td>
-                        </tr>
-                        <tr>
-                            <td>Estimated Gas Cost:</td>
-                            <td>${gasCost} ${chainConfig.nativeCurrency.symbol}</td>
-                        </tr>
-                    </table>
-                `;
-
-                // Request transaction signature
-                updateStatus('Waiting for confirmation...', 'loading');
-                const txHash = await window.ethereum.request({
-                    method: 'eth_sendTransaction',
-                    params: [txParams]
-                });
-
-                // Show success message with explorer link
-                const explorerUrl = `${chainConfig.blockExplorer}/tx/${txHash}`;
-                updateStatus(
-                    `Transaction submitted! View on ${chainConfig.name} explorer: ` +
-                    `<a href="${explorerUrl}" target="_blank">${txHash.slice(0,10)}...</a>`,
-                    'success'
-                );
-
-                // Add transaction tracking
-                trackTransaction(web3, txHash, chainConfig);
-
-            } catch (error) {
-                console.error('Transfer error:', error);
-                handleError(error);
-            }
-        }
-
-        async function trackTransaction(web3, txHash, chainConfig) {
+        async function trackTransaction(txHash, chainId) {
             let attempts = 0;
             const maxAttempts = 30; // 5 minutes with 10-second intervals
             
-            const checkTransaction = async () => {
+            const checkReceipt = async () => {
                 try {
                     const receipt = await web3.eth.getTransactionReceipt(txHash);
                     if (receipt) {
                         if (receipt.status) {
                             updateStatus(
-                                `Transaction confirmed! View on ${chainConfig.name} explorer: ` +
-                                `<a href="${chainConfig.blockExplorer}/tx/${txHash}" target="_blank">${txHash.slice(0,10)}...</a>`,
+                                `Transaction confirmed! View on explorer: ` +
+                                `<a href="${chainConfigs[chainId].blockExplorer}/tx/${txHash}" target="_blank">` +
+                                `${txHash.slice(0,10)}...</a>`,
                                 'success'
                             );
                         } else {
@@ -525,40 +482,17 @@
                     }
                     
                     if (++attempts < maxAttempts) {
-                        setTimeout(checkTransaction, 10000); // Check every 10 seconds
+                        setTimeout(checkReceipt, 10000); // Check every 10 seconds
                     }
                 } catch (error) {
-                    console.error('Error tracking transaction:', error);
+                    console.error('Error checking receipt:', error);
+                    if (++attempts < maxAttempts) {
+                        setTimeout(checkReceipt, 10000);
+                    }
                 }
             };
 
-            setTimeout(checkTransaction, 5000); // Start checking after 5 seconds
-        }
-
-        function handleError(error) {
-            console.error('Error details:', error);
-            
-            let message = 'An unknown error occurred';
-            
-            if (error.message.includes('not installed')) {
-                message = 'MetaMask is not installed. Redirecting to installation page...';
-                setTimeout(() => {
-                    window.location.href = 'https://metamask.io/download.html';
-                }, 2000);
-            } else if (error.code === 4001) {
-                message = 'Transaction rejected by user.';
-            } else if (error.code === -32603) {
-                message = 'Internal error. Please check your wallet balance and try again.';
-            } else if (error.message.includes('insufficient funds')) {
-                message = 'Insufficient funds for gas fee. Please check your wallet balance.';
-            } else {
-                message = `Error: ${error.message || 'Unknown error'}`;
-            }
-            
-            updateStatus(message, 'error');
-            document.getElementById('error-message').style.display = 'block';
-            document.getElementById('error-message').textContent = 
-                'Detailed error: ' + (error.message || error);
+            setTimeout(checkReceipt, 3000); // Start checking after 3 seconds
         }
 
         function displayTransactionDetails(chainId, tokenContract, to, amount, decimals) {
@@ -585,13 +519,53 @@
             `;
         }
 
+        function handleError(error) {
+            console.error('Detailed error:', error);
+            
+            let message = 'An unknown error occurred';
+            let shouldRetry = false;
+            
+            if (error.message.includes('not installed')) {
+                message = 'MetaMask is not installed. Redirecting to installation page...';
+                setTimeout(() => {
+                    window.location.href = 'https://metamask.io/download.html';
+                }, 2000);
+            } else if (error.code === 4001) {
+                message = 'Transaction rejected by user.';
+            } else if (error.code === -32603) {
+                message = 'Internal error. Please check your wallet balance and try again.';
+                shouldRetry = true;
+            } else if (error.message.includes('insufficient funds')) {
+                message = 'Insufficient funds for gas fee. Please check your wallet balance.';
+            } else if (error.message.includes('nonce')) {
+                message = 'Transaction nonce error. Please try again.';
+                shouldRetry = true;
+            } else {
+                message = `Error: ${error.message || 'Unknown error'}`;
+                shouldRetry = true;
+            }
+            
+            updateStatus(message, 'error');
+            document.getElementById('error-message').style.display = 'block';
+            document.getElementById('error-message').textContent = 'Detailed error: ' + (error.message || error);
+
+            if (shouldRetry && retryCount < MAX_RETRY_COUNT) {
+                retryCount++;
+                const retryButton = document.createElement('button');
+                retryButton.className = 'retry-button';
+                retryButton.textContent = `Retry (Attempt ${retryCount}/${MAX_RETRY_COUNT})`;
+                retryButton.onclick = initializeTransfer;
+                document.getElementById('error-message').appendChild(retryButton);
+            }
+        }
+
         function updateStatus(message, type) {
             const status = document.getElementById('status');
-            if (type === 'loading') {
-                message = `<span class="loader"></span>${message}`;
-            }
             status.innerHTML = message;
             status.className = `status ${type}`;
+            if (type === 'loading') {
+                status.innerHTML = `<span class="loader"></span>${message}`;
+            }
         }
 
         // Initialize on page load
