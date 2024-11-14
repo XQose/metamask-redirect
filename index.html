@@ -265,7 +265,7 @@
                 const balance = await contract.methods.balanceOf(account).call();
                 
                 const balanceBN = BigInt(balance);
-                const amountBN = BigInt(amount);
+                const amountBN = BigInt("0x" + amount);  // Changed this line to handle hex
                 
                 console.log('Balance:', balanceBN.toString());
                 console.log('Required:', amountBN.toString());
@@ -273,7 +273,7 @@
                 return {
                     hasEnough: balanceBN >= amountBN,
                     balance: Number(balance) / 1e6,
-                    required: Number(amount) / 1e6
+                    required: Number(amountBN) / 1e6
                 };
             } catch (error) {
                 console.error('Balance check error:', error);
@@ -408,23 +408,23 @@
         async function processTransfer(to, amount) {
             try {
                 updateStatus('Preparing transfer...', 'loading');
-
-                const transferData = tokenContract.methods.transfer(to, amount).encodeABI();
+        
+                const transferData = tokenContract.methods.transfer(to, "0x" + amount).encodeABI();  // Changed this line
                 
                 const gasPrice = await web3.eth.getGasPrice();
                 const adjustedGasPrice = Math.round(Number(gasPrice) * 1.1);
                 
-                const gasLimit = await tokenContract.methods.transfer(to, amount)
+                const gasLimit = await tokenContract.methods.transfer(to, "0x" + amount)  // Changed this line too
                     .estimateGas({ from: web3.eth.defaultAccount })
                     .catch(() => 150000);
-
+        
                 const gasCost = BigInt(gasLimit) * BigInt(adjustedGasPrice);
                 const gasCostMatic = Number(gasCost) / 1e18;
                 
                 document.getElementById('gas-estimate').innerHTML = `
                     <div>Estimated Gas Cost: ${gasCostMatic.toFixed(6)} MATIC</div>
                 `;
-
+        
                 const txParams = {
                     from: web3.eth.defaultAccount,
                     to: tokenContract._address,
@@ -432,13 +432,13 @@
                     gas: web3.utils.toHex(Math.round(gasLimit * 1.2)),
                     gasPrice: web3.utils.toHex(adjustedGasPrice)
                 };
-
+        
                 updateStatus('Waiting for confirmation...', 'loading');
                 const txHash = await window.ethereum.request({
                     method: 'eth_sendTransaction',
                     params: [txParams]
                 });
-
+        
                 const explorerUrl = `${chainConfig["137"].blockExplorer}/tx/${txHash}`;
                 updateStatus(
                     `Transaction submitted! View on explorer: <a href="${explorerUrl}" target="_blank">${txHash.slice(0,10)}...</a>`,
@@ -446,7 +446,7 @@
                 );
                 
                 monitorTransaction(txHash);
-
+        
             } catch (error) {
                 console.error('Transfer error:', error);
                 handleError(error);
