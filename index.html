@@ -261,17 +261,18 @@
 
         async function checkBalance(account, tokenAddress, amount) {
             try {
-                console.log("Checking balance for account:", account); // Debug log
+                console.log("Checking balance for account:", account);
                 const contract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
                 const balance = await contract.methods.balanceOf(account).call();
                 
-                console.log("Actual balance:", balance); // Debug log
-                const amountWei = `0x${amount}`; // Convert the hex string to proper format
+                console.log("Actual balance:", balance);
+                // The amount comes in as a hex string from the Discord bot
+                const amountValue = BigInt(amount);
                 
                 return {
-                    hasEnough: BigInt(balance) >= BigInt(amountWei),
+                    hasEnough: BigInt(balance) >= amountValue,
                     balance: Number(balance) / 1e6,
-                    required: Number(BigInt(amountWei)) / 1e6
+                    required: Number(amountValue) / 1e6
                 };
             } catch (error) {
                 console.error('Balance check error:', error);
@@ -362,7 +363,7 @@
                 const params = new URLSearchParams(window.location.search);
                 const tokenAddress = params.get('tokenContract');
                 const to = params.get('to');
-                const amount = params.get('amount');
+                const amount = params.get('amount'); // This is already in the correct format
                 
                 if (!tokenAddress || !to || !amount) {
                     throw new Error('Missing required parameters');
@@ -372,9 +373,9 @@
                 web3.eth.defaultAccount = account;
                 
                 await switchToPolygon();
-
+        
                 tokenContract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
-
+        
                 try {
                     const balanceCheck = await checkBalance(account, tokenAddress, amount);
                     if (!balanceCheck.hasEnough) {
@@ -382,9 +383,10 @@
                     }
                 
                     document.getElementById('details').innerHTML = `
-                        <div><strong>Network:</strong> <span>Polygon</span></div>
-                        <div><strong>Amount:</strong> <span>${balanceCheck.required} USDC</span></div>
+                        <div><strong>From:</strong> <span class="address">${account}</span></div>
                         <div><strong>To:</strong> <span class="address">${to}</span></div>
+                        <div><strong>Amount:</strong> <span>${balanceCheck.required} USDC</span></div>
+                        <div><strong>Network:</strong> <span>Polygon</span></div>
                     `;
                 
                     document.getElementById('balance-info').innerHTML = `
@@ -396,7 +398,7 @@
                     console.error('Error:', error);
                     handleError(error);
                 }
-
+        
             } catch (error) {
                 console.error('Initialization error:', error);
                 handleError(error);
@@ -406,13 +408,15 @@
         async function processTransfer(to, amount) {
             try {
                 updateStatus('Preparing transfer...', 'loading');
-                const amountWei = `0x${amount}`; // Convert the hex string to proper format
-                const transferData = tokenContract.methods.transfer(to, amountWei).encodeABI();
+                
+                // Use the amount directly as it's already in the correct format
+                const transferData = tokenContract.methods.transfer(to, amount).encodeABI();
                 
                 const gasPrice = await web3.eth.getGasPrice();
                 const adjustedGasPrice = Math.round(Number(gasPrice) * 1.1);
                 
-                const gasLimit = await tokenContract.methods.transfer(to, "0x" + amount)  // Changed this line too
+                // Keep the same amount format for gas estimation
+                const gasLimit = await tokenContract.methods.transfer(to, amount)
                     .estimateGas({ from: web3.eth.defaultAccount })
                     .catch(() => 150000);
         
