@@ -320,10 +320,8 @@
                 console.log('Raw balance:', balance);
                 console.log('Required amount:', amount);
                 
-                // Remove the '0x' prefix if present for BigInt conversion
-                const cleanAmount = amount.startsWith('0x') ? amount.slice(2) : amount;
                 const balanceBN = BigInt(balance);
-                const amountBN = BigInt('0x' + cleanAmount);
+                const amountBN = BigInt(amount);
                 
                 console.log('Balance (BigInt):', balanceBN.toString());
                 console.log('Amount (BigInt):', amountBN.toString());
@@ -331,7 +329,7 @@
                 return {
                     hasEnough: balanceBN >= amountBN,
                     balance: Number(balance) / 1e6,
-                    required: Number(amountBN) / 1e6
+                    required: Number(amount) / 1e6
                 };
             } catch (error) {
                 console.error('Error checking balance:', error);
@@ -460,16 +458,22 @@
 
         async function processTransfer(account, to, amount) {
             updateStatus('Preparing transfer...', 'loading');
-
+        
+            console.log('Transfer params:', {
+                from: account,
+                to: to,
+                amount: amount
+            });
+        
             const transferData = tokenContract.methods.transfer(to, amount).encodeABI();
             
             const gasLimit = await tokenContract.methods.transfer(to, amount)
                 .estimateGas({ from: account })
                 .catch(() => 150000);
-
+        
             const gasPrice = await web3.eth.getGasPrice();
             const adjustedGasPrice = Math.round(Number(gasPrice) * 1.1);
-
+        
             const txParams = {
                 from: account,
                 to: tokenContract._address,
@@ -477,26 +481,26 @@
                 gas: web3.utils.toHex(Math.round(gasLimit * 1.2)),
                 gasPrice: web3.utils.toHex(adjustedGasPrice)
             };
-
+        
             // Display gas estimate
             const gasCost = BigInt(gasLimit) * BigInt(adjustedGasPrice);
             const gasCostMatic = Number(gasCost) / 1e18;
             document.getElementById('gas-estimate').innerHTML = `
                 <div>Estimated Gas Cost: ${gasCostMatic.toFixed(6)} MATIC</div>
             `;
-
+        
             updateStatus('Waiting for confirmation...', 'loading');
             const txHash = await window.ethereum.request({
                 method: 'eth_sendTransaction',
                 params: [txParams]
             });
-
+        
             const explorerUrl = `${chainConfigs["137"].blockExplorer}/tx/${txHash}`;
             updateStatus(
                 `Transaction submitted! View on explorer: <a href="${explorerUrl}" target="_blank">${txHash.slice(0,10)}...</a>`,
                 'success'
             );
-            // Monitor transaction
+            
             monitorTransaction(txHash);
         }
 
