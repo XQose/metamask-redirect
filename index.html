@@ -4,17 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Token Transfer</title>
-    <!-- Use a specific version of Web3 for stability -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.3.0/web3.min.js" integrity="sha512-uz3qk2k5WzvLKQ4w6qELXpR4SrCKFnTYHXJA6PVvHG9H7dXnP7PHjEhxNOghQ3PRNZJEaQWg7lsJxzJvR0JQEg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- Use Web3.js for blockchain interactions -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.3.0/web3.min.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -22,7 +17,6 @@
             background-color: #f5f5f5;
             padding: 20px;
         }
-
         .container {
             background-color: white;
             border-radius: 12px;
@@ -31,14 +25,12 @@
             max-width: 500px;
             width: 100%;
         }
-
         h2 {
             color: #2d3748;
             margin-bottom: 20px;
             font-size: 24px;
             text-align: center;
         }
-
         .status {
             margin: 20px 0;
             padding: 12px;
@@ -47,38 +39,21 @@
             font-size: 14px;
             line-height: 1.5;
         }
-
-        .error {
-            background-color: #fff5f5;
-            color: #c53030;
-            border: 1px solid #feb2b2;
-        }
-
-        .success {
-            background-color: #f0fff4;
-            color: #276749;
-            border: 1px solid #9ae6b4;
-        }
-
-        .loading {
-            background-color: #ebf8ff;
-            color: #2b6cb0;
-            border: 1px solid #bee3f8;
-        }
-
+        .error { background-color: #fff5f5; color: #c53030; border: 1px solid #feb2b2; }
+        .success { background-color: #f0fff4; color: #276749; border: 1px solid #9ae6b4; }
+        .loading { background-color: #ebf8ff; color: #2b6cb0; border: 1px solid #bee3f8; }
+        .warning { background-color: #fffaf0; color: #c05621; border: 1px solid #fbd38d; }
         .details {
             background-color: #f7fafc;
             border-radius: 8px;
             padding: 16px;
             margin: 20px 0;
         }
-
         .details div {
             margin: 8px 0;
             color: #4a5568;
             font-size: 14px;
         }
-
         .address {
             font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
             font-size: 13px;
@@ -88,7 +63,6 @@
             border-radius: 4px;
             margin-top: 4px;
         }
-
         button {
             background-color: #4299e1;
             color: white;
@@ -102,84 +76,70 @@
             margin: 8px 0;
             transition: background-color 0.2s;
         }
-
-        button:hover {
-            background-color: #3182ce;
-        }
-
+        button:hover { background-color: #3182ce; }
         button:disabled {
             background-color: #cbd5e0;
             cursor: not-allowed;
         }
-
-        button#switchNetwork {
-            background-color: #ed8936;
+        .gas-estimate {
+            background-color: #f0f4f8;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 12px 0;
+            font-size: 14px;
         }
-
-        button#switchNetwork:hover {
-            background-color: #dd6b20;
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #3498db;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 8px;
+            vertical-align: middle;
         }
-
-        a {
-            color: #4299e1;
-            text-decoration: none;
-            font-weight: 500;
-        }
-
-        a:hover {
-            text-decoration: underline;
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>Token Transfer</h2>
-        <div id="status" class="status loading">Connecting to wallet...</div>
-        <div class="details" id="details"></div>
-        <button id="connectButton" onclick="connectWallet()">Connect Wallet</button>
-        <button id="sendButton" style="display: none;" onclick="sendTransaction()">Send Transaction</button>
-        <button id="switchNetwork" style="display: none;" onclick="switchNetwork()">Switch Network</button>
+        <div id="status" class="status loading">Initializing transfer...</div>
+        <div id="details" class="details"></div>
+        <div id="gasEstimate" class="gas-estimate" style="display: none;"></div>
+        <button id="confirmButton" onclick="handleTransfer()" style="display: none;">Confirm Transfer</button>
     </div>
 
     <script>
+        const params = new URLSearchParams(window.location.search);
         let web3;
         let currentAccount;
-        const params = new URLSearchParams(window.location.search);
-
-        const erc20ABI = [{
-            "constant": false,
-            "inputs": [
-                {"name": "_to", "type": "address"},
-                {"name": "_value", "type": "uint256"}
-            ],
-            "name": "transfer",
-            "outputs": [{"name": "", "type": "bool"}],
-            "payable": false,
-            "stateMutability": "nonpayable",
-            "type": "function"
-        }];
 
         const chainConfigs = {
             "1": {
-                name: "Ethereum Mainnet",
+                name: "Ethereum",
                 rpcUrls: ["https://mainnet.infura.io/v3/YOUR-PROJECT-ID"],
                 nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
                 blockExplorerUrls: ["https://etherscan.io"]
             },
             "137": {
-                name: "Polygon Mainnet",
+                name: "Polygon",
                 rpcUrls: ["https://polygon-rpc.com"],
                 nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
                 blockExplorerUrls: ["https://polygonscan.com"]
             },
             "56": {
-                name: "BSC Mainnet",
+                name: "BSC",
                 rpcUrls: ["https://bsc-dataseed1.binance.org"],
                 nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
                 blockExplorerUrls: ["https://bscscan.com"]
             },
             "43114": {
-                name: "Avalanche C-Chain",
+                name: "Avalanche",
                 rpcUrls: ["https://api.avax.network/ext/bc/C/rpc"],
                 nativeCurrency: { name: "AVAX", symbol: "AVAX", decimals: 18 },
                 blockExplorerUrls: ["https://snowtrace.io"]
@@ -192,121 +152,170 @@
             }
         };
 
-        async function connectWallet() {
-            try {
-                if (typeof window.ethereum === 'undefined') {
-                    updateStatus('MetaMask is not installed. Please install MetaMask to continue.', 'error');
-                    return;
-                }
+        const ERC20_ABI = [{
+            "constant": false,
+            "inputs": [
+                {"name": "_to", "type": "address"},
+                {"name": "_value", "type": "uint256"}
+            ],
+            "name": "transfer",
+            "outputs": [{"name": "", "type": "bool"}],
+            "payable": false,
+            "stateMutability": "nonpayable",
+            "type": "function"
+        }];
 
-                // Request account access immediately
-                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-                currentAccount = accounts[0];
+        async function initializeWeb3() {
+            if (typeof window.ethereum !== 'undefined') {
                 web3 = new Web3(window.ethereum);
-
-                // Check and switch network if needed
-                const chainId = await web3.eth.getChainId();
-                const targetChainId = parseInt(params.get('chainId'));
-                
-                if (chainId !== targetChainId) {
-                    await switchNetwork();
-                    return;
+                try {
+                    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    currentAccount = accounts[0];
+                    await setupTransaction();
+                } catch (error) {
+                    updateStatus('Please connect your wallet to continue.', 'warning');
+                    console.error('User rejected connection:', error);
                 }
-
-                // Prepare and initiate transaction
-                await prepareTransaction();
-            } catch (error) {
-                console.error('Connection error:', error);
-                updateStatus(`Error: ${error.message}`, 'error');
+            } else {
+                updateStatus('MetaMask is not installed. Redirecting to MetaMask...', 'warning');
+                setTimeout(() => {
+                    window.location.href = 'https://metamask.io/download.html';
+                }, 3000);
             }
         }
 
-        async function prepareTransaction() {
-            try {
-                const tokenContract = params.get('tokenContract');
-                const to = params.get('to');
-                const amount = params.get('amount');
-                const decimals = parseInt(params.get('decimals'));
-
-                if (!tokenContract || !to || !amount || !decimals) {
-                    throw new Error('Missing required transaction parameters');
-                }
-
-                displayTransactionDetails();
-
-                // Create contract instance and prepare transaction
-                const contract = new web3.eth.Contract(erc20ABI, tokenContract);
-                const data = contract.methods.transfer(to, '0x' + amount).encodeABI();
-                
-                // Hide connect button and show send button
-                document.getElementById('connectButton').style.display = 'none';
-                document.getElementById('sendButton').style.display = 'inline-block';
-                
-                // Automatically trigger transaction
-                await sendTransaction();
-            } catch (error) {
-                console.error('Preparation error:', error);
-                updateStatus(`Error preparing transaction: ${error.message}`, 'error');
-            }
-        }
-
-        function displayTransactionDetails() {
+        async function setupTransaction() {
+            const chainId = params.get('chainId');
             const tokenContract = params.get('tokenContract');
             const to = params.get('to');
-            const amount = parseInt(params.get('amount'), 16) / Math.pow(10, parseInt(params.get('decimals')));
-            const chainId = params.get('chainId');
-            const chain = chainConfigs[chainId];
+            const amount = params.get('amount');
+            const decimals = parseInt(params.get('decimals') || '6');
 
-            if (!chain) {
-                updateStatus('Invalid network specified', 'error');
+            if (!chainId || !tokenContract || !to || !amount) {
+                updateStatus('Invalid parameters provided', 'error');
                 return;
             }
 
+            // Display transaction details
+            displayTransactionDetails(chainId, tokenContract, to, amount, decimals);
+
+            try {
+                // Switch to correct network
+                await switchNetwork(chainId);
+                
+                // Estimate gas
+                const gasEstimate = await estimateGas(tokenContract, to, amount);
+                displayGasEstimate(gasEstimate, chainId);
+
+                // Show confirm button
+                document.getElementById('confirmButton').style.display = 'block';
+            } catch (error) {
+                updateStatus(`Error setting up transaction: ${error.message}`, 'error');
+            }
+        }
+
+        async function switchNetwork(chainId) {
+            const chainConfig = chainConfigs[chainId];
+            if (!chainConfig) {
+                throw new Error('Unsupported network');
+            }
+
+            try {
+                await window.ethereum.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: `0x${parseInt(chainId).toString(16)}` }],
+                });
+            } catch (error) {
+                if (error.code === 4902) {
+                    await window.ethereum.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [{
+                            chainId: `0x${parseInt(chainId).toString(16)}`,
+                            chainName: chainConfig.name,
+                            nativeCurrency: chainConfig.nativeCurrency,
+                            rpcUrls: chainConfig.rpcUrls,
+                            blockExplorerUrls: chainConfig.blockExplorerUrls
+                        }]
+                    });
+                } else {
+                    throw error;
+                }
+            }
+        }
+
+        async function estimateGas(tokenContract, to, amount) {
+            const contract = new web3.eth.Contract(ERC20_ABI, tokenContract);
+            try {
+                const gasLimit = await contract.methods.transfer(to, `0x${amount}`)
+                    .estimateGas({ from: currentAccount });
+                const gasPrice = await web3.eth.getGasPrice();
+                return {
+                    gasLimit: Math.floor(gasLimit * 1.2), // Add 20% buffer
+                    gasPrice: gasPrice,
+                    totalCost: web3.utils.fromWei(
+                        BigInt(Math.floor(gasLimit * 1.2)) * BigInt(gasPrice) + '',
+                        'ether'
+                    )
+                };
+            } catch (error) {
+                console.error('Gas estimation failed:', error);
+                return null;
+            }
+        }
+
+        function displayTransactionDetails(chainId, tokenContract, to, amount, decimals) {
+            const chainConfig = chainConfigs[chainId];
+            const amountNumber = parseInt(amount, 16) / Math.pow(10, decimals);
+            
             document.getElementById('details').innerHTML = `
-                <div>Network: ${chain.name}</div>
-                <div>Amount: ${amount}</div>
-                <div>Token Contract: <span class="address">${tokenContract}</span></div>
+                <div>Network: ${chainConfig?.name || chainId}</div>
+                <div>Amount: ${amountNumber.toFixed(decimals)} Tokens</div>
+                <div>Contract: <span class="address">${tokenContract}</span></div>
                 <div>Recipient: <span class="address">${to}</span></div>
             `;
         }
 
-        async function sendTransaction() {
-            try {
-                document.getElementById('sendButton').disabled = true;
-                updateStatus('Preparing transaction...', 'loading');
+        function displayGasEstimate(estimate, chainId) {
+            const chainConfig = chainConfigs[chainId];
+            if (estimate) {
+                document.getElementById('gasEstimate').innerHTML = `
+                    Estimated Gas Cost: ${estimate.totalCost} ${chainConfig.nativeCurrency.symbol}
+                `;
+                document.getElementById('gasEstimate').style.display = 'block';
+            }
+        }
 
+        async function handleTransfer() {
+            const button = document.getElementById('confirmButton');
+            button.disabled = true;
+            updateStatus('Processing transaction...', 'loading');
+
+            try {
                 const tokenContract = params.get('tokenContract');
                 const to = params.get('to');
                 const amount = params.get('amount');
 
-                const contract = new web3.eth.Contract(erc20ABI, tokenContract);
-                const data = contract.methods.transfer(to, '0x' + amount).encodeABI();
+                const contract = new web3.eth.Contract(ERC20_ABI, tokenContract);
+                const data = contract.methods.transfer(to, `0x${amount}`).encodeABI();
 
-                // Estimate gas for better UX
-                let gasLimit;
-                try {
-                    gasLimit = await contract.methods.transfer(to, '0x' + amount)
-                        .estimateGas({ from: currentAccount });
-                    gasLimit = Math.floor(gasLimit * 1.2); // Add 20% buffer
-                } catch (e) {
-                    console.warn('Gas estimation failed, using default:', e);
-                    gasLimit = 100000; // Default gas limit
-                }
-
+                const gasEstimate = await estimateGas(tokenContract, to, amount);
+                
                 const tx = await window.ethereum.request({
                     method: 'eth_sendTransaction',
                     params: [{
                         from: currentAccount,
                         to: tokenContract,
                         data: data,
-                        gas: web3.utils.toHex(gasLimit),
-                        value: '0x0'
+                        gas: web3.utils.toHex(gasEstimate.gasLimit),
+                        gasPrice: web3.utils.toHex(gasEstimate.gasPrice)
                     }]
                 });
 
                 updateStatus(`Transaction sent! Hash: ${tx}`, 'success');
-
-                const chainConfig = chainConfigs[params.get('chainId')];
+                
+                // Add explorer link
+                const chainId = params.get('chainId');
+                const chainConfig = chainConfigs[chainId];
                 if (chainConfig?.blockExplorerUrls) {
                     const link = document.createElement('a');
                     link.href = `${chainConfig.blockExplorerUrls[0]}/tx/${tx}`;
@@ -317,42 +326,8 @@
                 }
             } catch (error) {
                 console.error('Transaction error:', error);
-                document.getElementById('sendButton').disabled = false;
                 updateStatus(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        async function switchNetwork() {
-            const targetChainId = params.get('chainId');
-            const chainConfig = chainConfigs[targetChainId];
-
-            try {
-                await window.ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: `0x${parseInt(targetChainId).toString(16)}` }]
-                });
-                // After switching network, prepare the transaction
-                await prepareTransaction();
-            } catch (error) {
-                if (error.code === 4902) {
-                    try {
-                        await window.ethereum.request({
-                            method: 'wallet_addEthereumChain',
-                            params: [{
-                                chainId: `0x${parseInt(targetChainId).toString(16)}`,
-                                chainName: chainConfig.name,
-                                nativeCurrency: chainConfig.nativeCurrency,
-                                rpcUrls: chainConfig.rpcUrls,
-                                blockExplorerUrls: chainConfig.blockExplorerUrls
-                            }]
-                        });
-                        await prepareTransaction();
-                    } catch (addError) {
-                        updateStatus(`Error adding network: ${addError.message}`, 'error');
-                    }
-                } else {
-                    updateStatus(`Error switching network: ${error.message}`, 'error');
-                }
+                button.disabled = false;
             }
         }
 
@@ -362,10 +337,8 @@
             status.className = `status ${type}`;
         }
 
-        // Start the process immediately when page loads
-        window.addEventListener('load', () => {
-            connectWallet().catch(console.error);
-        });
+        // Initialize on page load
+        window.addEventListener('load', initializeWeb3);
 
         // Setup MetaMask event listeners
         if (window.ethereum) {
