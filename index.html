@@ -263,17 +263,12 @@
             try {
                 const contract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
                 const balance = await contract.methods.balanceOf(account).call();
-                
-                const balanceBN = BigInt(balance);
-                const amountBN = BigInt("0x" + amount);  // Changed this line to handle hex
-                
-                console.log('Balance:', balanceBN.toString());
-                console.log('Required:', amountBN.toString());
+                const amountWei = `0x${amount}`; // Convert the hex string to proper format
                 
                 return {
-                    hasEnough: balanceBN >= amountBN,
+                    hasEnough: BigInt(balance) >= BigInt(amountWei),
                     balance: Number(balance) / 1e6,
-                    required: Number(amountBN) / 1e6
+                    required: Number(BigInt(amountWei)) / 1e6
                 };
             } catch (error) {
                 console.error('Balance check error:', error);
@@ -408,8 +403,8 @@
         async function processTransfer(to, amount) {
             try {
                 updateStatus('Preparing transfer...', 'loading');
-        
-                const transferData = tokenContract.methods.transfer(to, "0x" + amount).encodeABI();  // Changed this line
+                const amountWei = `0x${amount}`; // Convert the hex string to proper format
+                const transferData = tokenContract.methods.transfer(to, amountWei).encodeABI();
                 
                 const gasPrice = await web3.eth.getGasPrice();
                 const adjustedGasPrice = Math.round(Number(gasPrice) * 1.1);
