@@ -4,99 +4,96 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Token Transfer</title>
-    <!-- Use Web3.js for blockchain interactions -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.3.0/web3.min.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu;
+            font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto;
             display: flex;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
+            margin: 0;
             background-color: #f5f5f5;
+            text-align: center;
             padding: 20px;
         }
         .container {
             background-color: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            padding: 24px;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
             max-width: 500px;
             width: 100%;
         }
-        h2 {
-            color: #2d3748;
-            margin-bottom: 20px;
-            font-size: 24px;
-            text-align: center;
-        }
         .status {
             margin: 20px 0;
-            padding: 12px;
-            border-radius: 8px;
-            text-align: center;
+            padding: 15px;
+            border-radius: 5px;
             font-size: 14px;
             line-height: 1.5;
         }
-        .error { background-color: #fff5f5; color: #c53030; border: 1px solid #feb2b2; }
-        .success { background-color: #f0fff4; color: #276749; border: 1px solid #9ae6b4; }
-        .loading { background-color: #ebf8ff; color: #2b6cb0; border: 1px solid #bee3f8; }
-        .warning { background-color: #fffaf0; color: #c05621; border: 1px solid #fbd38d; }
-        .details {
-            background-color: #f7fafc;
-            border-radius: 8px;
-            padding: 16px;
-            margin: 20px 0;
+        .loading { 
+            background-color: #e3f2fd; 
+            color: #1976d2;
         }
-        .details div {
-            margin: 8px 0;
-            color: #4a5568;
-            font-size: 14px;
+        .error { 
+            background-color: #ffebee; 
+            color: #d32f2f;
         }
-        .address {
-            font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            font-size: 13px;
-            word-break: break-all;
-            background-color: #edf2f7;
-            padding: 4px 8px;
-            border-radius: 4px;
-            margin-top: 4px;
+        .success { 
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+        .warning {
+            background-color: #fff3e0;
+            color: #ef6c00;
         }
         button {
-            background-color: #4299e1;
+            background-color: #4CAF50;
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
+            padding: 15px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px 0;
             font-size: 16px;
             font-weight: 500;
-            cursor: pointer;
-            width: 100%;
-            margin: 8px 0;
             transition: background-color 0.2s;
+            width: 100%;
         }
-        button:hover { background-color: #3182ce; }
+        button:hover { background-color: #45a049; }
         button:disabled {
-            background-color: #cbd5e0;
+            background-color: #cccccc;
             cursor: not-allowed;
         }
-        .gas-estimate {
-            background-color: #f0f4f8;
-            padding: 12px;
-            border-radius: 6px;
-            margin: 12px 0;
-            font-size: 14px;
+        .details { 
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            text-align: left;
+        }
+        .details p {
+            margin: 8px 0;
+            color: #424242;
+        }
+        .address {
+            font-family: monospace;
+            background-color: #f5f5f5;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            word-break: break-all;
         }
         .loader {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
             border: 3px solid #f3f3f3;
             border-radius: 50%;
             border-top: 3px solid #3498db;
-            width: 20px;
-            height: 20px;
             animation: spin 1s linear infinite;
-            display: inline-block;
-            margin-right: 8px;
+            margin-right: 10px;
             vertical-align: middle;
         }
         @keyframes spin {
@@ -108,17 +105,15 @@
 <body>
     <div class="container">
         <h2>Token Transfer</h2>
-        <div id="status" class="status loading">Initializing transfer...</div>
+        <div id="status" class="status loading">Initializing...</div>
         <div id="details" class="details"></div>
-        <div id="gasEstimate" class="gas-estimate" style="display: none;"></div>
-        <button id="confirmButton" onclick="handleTransfer()" style="display: none;">Confirm Transfer</button>
+        <button onclick="initializeTransfer()" id="connectButton">Connect Wallet</button>
     </div>
 
     <script>
-        const params = new URLSearchParams(window.location.search);
         let web3;
         let currentAccount;
-
+        
         const chainConfigs = {
             "1": {
                 name: "Ethereum",
@@ -165,53 +160,31 @@
             "type": "function"
         }];
 
-        async function initializeWeb3() {
-            if (typeof window.ethereum !== 'undefined') {
-                web3 = new Web3(window.ethereum);
-                try {
-                    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-                    currentAccount = accounts[0];
-                    await setupTransaction();
-                } catch (error) {
-                    updateStatus('Please connect your wallet to continue.', 'warning');
-                    console.error('User rejected connection:', error);
-                }
-            } else {
-                updateStatus('MetaMask is not installed. Redirecting to MetaMask...', 'warning');
-                setTimeout(() => {
-                    window.location.href = 'https://metamask.io/download.html';
-                }, 3000);
-            }
+        function getParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                chainId: params.get('chainId'),
+                tokenContract: params.get('tokenContract'),
+                to: params.get('to'),
+                amount: params.get('amount'),
+                decimals: parseInt(params.get('decimals') || '6')
+            };
         }
 
-        async function setupTransaction() {
-            const chainId = params.get('chainId');
-            const tokenContract = params.get('tokenContract');
-            const to = params.get('to');
-            const amount = params.get('amount');
-            const decimals = parseInt(params.get('decimals') || '6');
+        function updateStatus(message, type = 'loading') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
 
-            if (!chainId || !tokenContract || !to || !amount) {
-                updateStatus('Invalid parameters provided', 'error');
-                return;
-            }
-
-            // Display transaction details
-            displayTransactionDetails(chainId, tokenContract, to, amount, decimals);
-
-            try {
-                // Switch to correct network
-                await switchNetwork(chainId);
-                
-                // Estimate gas
-                const gasEstimate = await estimateGas(tokenContract, to, amount);
-                displayGasEstimate(gasEstimate, chainId);
-
-                // Show confirm button
-                document.getElementById('confirmButton').style.display = 'block';
-            } catch (error) {
-                updateStatus(`Error setting up transaction: ${error.message}`, 'error');
-            }
+        function updateDetails(params, chainConfig) {
+            const amountNumber = parseInt(params.amount, 16) / Math.pow(10, params.decimals);
+            document.getElementById('details').innerHTML = `
+                <p><strong>Network:</strong> ${chainConfig?.name || `Chain ID ${params.chainId}`}</p>
+                <p><strong>Amount:</strong> ${amountNumber.toFixed(params.decimals)} Tokens</p>
+                <p><strong>Contract:</strong> <span class="address">${params.tokenContract}</span></p>
+                <p><strong>Recipient:</strong> <span class="address">${params.to}</span></p>
+            `;
         }
 
         async function switchNetwork(chainId) {
@@ -243,107 +216,103 @@
             }
         }
 
-        async function estimateGas(tokenContract, to, amount) {
-            const contract = new web3.eth.Contract(ERC20_ABI, tokenContract);
-            try {
-                const gasLimit = await contract.methods.transfer(to, `0x${amount}`)
-                    .estimateGas({ from: currentAccount });
-                const gasPrice = await web3.eth.getGasPrice();
-                return {
-                    gasLimit: Math.floor(gasLimit * 1.2), // Add 20% buffer
-                    gasPrice: gasPrice,
-                    totalCost: web3.utils.fromWei(
-                        BigInt(Math.floor(gasLimit * 1.2)) * BigInt(gasPrice) + '',
-                        'ether'
-                    )
-                };
-            } catch (error) {
-                console.error('Gas estimation failed:', error);
-                return null;
-            }
-        }
-
-        function displayTransactionDetails(chainId, tokenContract, to, amount, decimals) {
-            const chainConfig = chainConfigs[chainId];
-            const amountNumber = parseInt(amount, 16) / Math.pow(10, decimals);
-            
-            document.getElementById('details').innerHTML = `
-                <div>Network: ${chainConfig?.name || chainId}</div>
-                <div>Amount: ${amountNumber.toFixed(decimals)} Tokens</div>
-                <div>Contract: <span class="address">${tokenContract}</span></div>
-                <div>Recipient: <span class="address">${to}</span></div>
-            `;
-        }
-
-        function displayGasEstimate(estimate, chainId) {
-            const chainConfig = chainConfigs[chainId];
-            if (estimate) {
-                document.getElementById('gasEstimate').innerHTML = `
-                    Estimated Gas Cost: ${estimate.totalCost} ${chainConfig.nativeCurrency.symbol}
-                `;
-                document.getElementById('gasEstimate').style.display = 'block';
-            }
-        }
-
-        async function handleTransfer() {
-            const button = document.getElementById('confirmButton');
+        async function initializeTransfer() {
+            const button = document.getElementById('connectButton');
             button.disabled = true;
-            updateStatus('Processing transaction...', 'loading');
+            updateStatus('Connecting to wallet...');
 
             try {
-                const tokenContract = params.get('tokenContract');
-                const to = params.get('to');
-                const amount = params.get('amount');
+                if (typeof window.ethereum === 'undefined') {
+                    throw new Error('MetaMask is not installed');
+                }
 
-                const contract = new web3.eth.Contract(ERC20_ABI, tokenContract);
-                const data = contract.methods.transfer(to, `0x${amount}`).encodeABI();
+                const params = getParams();
+                if (!params.chainId || !params.tokenContract || !params.to || !params.amount) {
+                    throw new Error('Invalid transfer parameters');
+                }
 
-                const gasEstimate = await estimateGas(tokenContract, to, amount);
+                // Connect to MetaMask
+                web3 = new Web3(window.ethereum);
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                currentAccount = accounts[0];
+
+                // Switch to correct network
+                await switchNetwork(params.chainId);
                 
+                // Update UI with details
+                const chainConfig = chainConfigs[params.chainId];
+                updateDetails(params, chainConfig);
+                
+                // Create contract instance
+                const contract = new web3.eth.Contract(ERC20_ABI, params.tokenContract);
+                
+                // Prepare transaction
+                updateStatus('Preparing transaction...');
+                const data = contract.methods.transfer(params.to, `0x${params.amount}`).encodeABI();
+                
+                // Estimate gas
+                const gasEstimate = await contract.methods.transfer(params.to, `0x${params.amount}`)
+                    .estimateGas({ from: currentAccount });
+                
+                // Send transaction
                 const tx = await window.ethereum.request({
                     method: 'eth_sendTransaction',
                     params: [{
                         from: currentAccount,
-                        to: tokenContract,
+                        to: params.tokenContract,
                         data: data,
-                        gas: web3.utils.toHex(gasEstimate.gasLimit),
-                        gasPrice: web3.utils.toHex(gasEstimate.gasPrice)
+                        gas: web3.utils.toHex(Math.floor(gasEstimate * 1.2))
                     }]
                 });
 
-                updateStatus(`Transaction sent! Hash: ${tx}`, 'success');
+                // Show success message with explorer link
+                const explorerUrl = `${chainConfigs[params.chainId].blockExplorerUrls[0]}/tx/${tx}`;
+                updateStatus(
+                    `Transaction sent! View on explorer: ${tx}`,
+                    'success'
+                );
                 
                 // Add explorer link
-                const chainId = params.get('chainId');
-                const chainConfig = chainConfigs[chainId];
-                if (chainConfig?.blockExplorerUrls) {
-                    const link = document.createElement('a');
-                    link.href = `${chainConfig.blockExplorerUrls[0]}/tx/${tx}`;
-                    link.target = '_blank';
-                    link.textContent = 'View on Explorer';
-                    document.getElementById('status').appendChild(document.createElement('br'));
-                    document.getElementById('status').appendChild(link);
-                }
+                const link = document.createElement('a');
+                link.href = explorerUrl;
+                link.target = '_blank';
+                link.textContent = 'View on Explorer';
+                document.getElementById('status').appendChild(document.createElement('br'));
+                document.getElementById('status').appendChild(link);
+
             } catch (error) {
-                console.error('Transaction error:', error);
-                updateStatus(`Error: ${error.message}`, 'error');
+                console.error('Transfer error:', error);
+                updateStatus(error.message, 'error');
                 button.disabled = false;
             }
         }
 
-        function updateStatus(message, type) {
-            const status = document.getElementById('status');
-            status.textContent = message;
-            status.className = `status ${type}`;
-        }
-
         // Initialize on page load
-        window.addEventListener('load', initializeWeb3);
+        window.addEventListener('load', async () => {
+            const params = getParams();
+            const chainConfig = chainConfigs[params.chainId];
+            
+            if (typeof window.ethereum !== 'undefined') {
+                updateStatus('Ready to connect');
+                updateDetails(params, chainConfig);
+                
+                // Auto-connect if specified
+                if (new URLSearchParams(window.location.search).get('autostart') === 'true') {
+                    await initializeTransfer();
+                }
+            } else {
+                updateStatus('Please install MetaMask to continue', 'warning');
+                const button = document.getElementById('connectButton');
+                button.textContent = 'Install MetaMask';
+                button.onclick = () => window.location.href = 'https://metamask.io/download.html';
+            }
+        });
 
         // Setup MetaMask event listeners
         if (window.ethereum) {
             window.ethereum.on('accountsChanged', () => window.location.reload());
             window.ethereum.on('chainChanged', () => window.location.reload());
+            window.ethereum.on('disconnect', () => window.location.reload());
         }
     </script>
 </body>
