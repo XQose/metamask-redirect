@@ -382,7 +382,7 @@
 
                 tokenContract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
 
-                const balanceCheck = await checkBalance(account, tokenAddress, '0x' + amount);
+                const balanceCheck = await checkBalance(account, tokenAddress, amount);
                 if (!balanceCheck.hasEnough) {
                     throw new Error(`Insufficient balance. Required: ${balanceCheck.required}, Available: ${balanceCheck.balance}`);
                 }
