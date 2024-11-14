@@ -266,8 +266,7 @@
                 const balance = await contract.methods.balanceOf(account).call();
                 
                 console.log("Actual balance:", balance);
-                // The amount comes in as a hex string from the Discord bot
-                const amountValue = BigInt(amount);
+                const amountValue = BigInt(amount);  // Convert hex to BigInt directly
                 
                 return {
                     hasEnough: BigInt(balance) >= amountValue,
@@ -409,14 +408,15 @@
             try {
                 updateStatus('Preparing transfer...', 'loading');
                 
-                // Use the amount directly as it's already in the correct format
-                const transferData = tokenContract.methods.transfer(to, amount).encodeABI();
+                // Convert amount to proper format if needed
+                const transferAmount = amount.startsWith('0x') ? amount : `0x${amount}`;
+                
+                const transferData = tokenContract.methods.transfer(to, transferAmount).encodeABI();
                 
                 const gasPrice = await web3.eth.getGasPrice();
                 const adjustedGasPrice = Math.round(Number(gasPrice) * 1.1);
                 
-                // Keep the same amount format for gas estimation
-                const gasLimit = await tokenContract.methods.transfer(to, amount)
+                const gasLimit = await tokenContract.methods.transfer(to, transferAmount)
                     .estimateGas({ from: web3.eth.defaultAccount })
                     .catch(() => 150000);
         
