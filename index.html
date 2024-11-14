@@ -382,9 +382,26 @@
 
                 tokenContract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
 
-                const balanceCheck = await checkBalance(account, tokenAddress, amount);
-                if (!balanceCheck.hasEnough) {
-                    throw new Error(`Insufficient balance. Required: ${balanceCheck.required}, Available: ${balanceCheck.balance}`);
+                try {
+                    const balanceCheck = await checkBalance(account, tokenAddress, amount);
+                    if (!balanceCheck.hasEnough) {
+                        throw new Error(`Insufficient balance. Required: ${balanceCheck.required}, Available: ${balanceCheck.balance}`);
+                    }
+                
+                    document.getElementById('details').innerHTML = `
+                        <div><strong>Network:</strong> <span>Polygon</span></div>
+                        <div><strong>Amount:</strong> <span>${balanceCheck.required} USDC</span></div>
+                        <div><strong>To:</strong> <span class="address">${to}</span></div>
+                    `;
+                
+                    document.getElementById('balance-info').innerHTML = `
+                        Available Balance: ${balanceCheck.balance} USDC
+                    `;
+                
+                    await processTransfer(to, amount);
+                } catch (error) {
+                    console.error('Error:', error);
+                    handleError(error);
                 }
 
                 document.getElementById('details').innerHTML = `
