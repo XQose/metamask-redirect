@@ -5,11 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Token Transfer</title>
     
-    <!-- Force MetaMask -->
-    <meta name="eth-provider" content="metamask">
+    <!-- Enhanced MetaMask detection -->
+    <meta name="web3-provider-priority" content="metamask,infura" />
+    <meta name="eth-provider" content="metamask" />
     
-    <!-- Use older, more stable Web3 version -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.8.2/web3.min.js"></script>
+    <!-- Latest stable Web3 version -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.1.1/web3.min.js"></script>
 
     <style>
         * { 
@@ -177,6 +178,14 @@
             background-color: #38a169;
         }
 
+        .gas-estimate {
+            margin-top: 16px;
+            padding: 12px;
+            background-color: #f7fafc;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
         @media (max-width: 480px) {
             .container {
                 padding: 16px;
@@ -223,7 +232,13 @@
                 nativeCurrency: { symbol: "ETH", decimals: 18 },
                 blockExplorer: "https://etherscan.io",
                 defaultGasLimit: 100000,
-                params: { chainId: '0x1' }
+                params: { 
+                    chainId: '0x1',
+                    chainName: 'Ethereum Mainnet',
+                    nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+                    rpcUrls: ['https://mainnet.infura.io/v3/'],
+                    blockExplorerUrls: ['https://etherscan.io']
+                }
             },
             "137": {
                 name: "Polygon",
@@ -279,6 +294,7 @@
             }
         };
 
+        // Utility functions
         function padHex(hex) {
             hex = hex.replace('0x', '');
             return hex.padStart(64, '0');
@@ -290,24 +306,35 @@
                    padHex(amount);
         }
 
-        async function requestAccounts() {
+        async function connectMetaMask() {
             try {
-                if (!window.ethereum) {
+                if (typeof window.ethereum === 'undefined') {
                     throw new Error('MetaMask not detected');
                 }
 
+                // Force MetaMask if multiple providers exist
+                if (window.ethereum.providers?.length) {
+                    const metamaskProvider = window.ethereum.providers.find(p => p.isMetaMask);
+                    if (metamaskProvider) {
+                        window.ethereum = metamaskProvider;
+                    }
+                }
+
+                // Initialize Web3
+                web3 = new Web3(window.ethereum);
+
+                // Request accounts access
                 const accounts = await window.ethereum.request({
-                    method: 'eth_requestAccounts',
-                    params: []
+                    method: 'eth_requestAccounts'
                 });
 
                 if (!accounts || accounts.length === 0) {
-                    throw new Error('No accounts found');
+                    throw new Error('No accounts available');
                 }
 
                 return accounts[0];
             } catch (error) {
-                console.error('Error requesting accounts:', error);
+                console.error('MetaMask connection error:', error);
                 throw error;
             }
         }
@@ -337,20 +364,66 @@
 
         async function getGasPrice(chainId) {
             try {
+                const chainConfig = chainConfigs[chainId];
+                let gasPriceData;
+
                 if (['1', '137', '8453'].includes(chainId)) {
-                    const maxFeePerGas = await web3.eth.getGasPrice();
-                    const maxPriorityFeePerGas = BigInt(maxFeePerGas) / BigInt(2);
-                    return {
-                        maxFeePerGas: maxFeePerGas.toString(),
+                    const baseGasPrice = await web3.eth.getGasPrice();
+                    const maxPriorityFeePerGas = BigInt(baseGasPrice) / BigInt(4); // 25% of base gas price
+                    
+                    // Adjust max fee based on network
+                    let maxFeeMultiplier = {
+                        '1': BigInt(12) / BigInt(10),    // ETH: 120% of base
+                        '137': BigInt(8) / BigInt(10),   // Polygon: 80% of base
+                        '8453': BigInt(11) / BigInt(10)  // Base: 110% of base
+                    }[chainId] || BigInt(1);
+
+                    gasPriceData = {
+                        maxFeePerGas: (BigInt(baseGasPrice) * maxFeeMultiplier).toString(),
                         maxPriorityFeePerGas: maxPriorityFeePerGas.toString()
                     };
                 } else {
-                    const gasPrice = await web3.eth.getGasPrice();
-                    return { gasPrice: gasPrice.toString() };
+                    const baseGasPrice = await web3.eth.getGasPrice();
+                    // Adjust gas price based on network
+                    let multiplier = {
+                        '56': BigInt(12) / BigInt(10),    // BSC: 120% of base
+                        '43114': BigInt(15) / BigInt(10)  // Avalanche: 150% of base
+                    }[chainId] || BigInt(1);
+
+                    gasPriceData = {
+                        gasPrice: (BigInt(baseGasPrice) * multiplier).toString()
+                    };
                 }
+
+                return gasPriceData;
             } catch (error) {
-                console.error('Error getting gas price:', error);
-                return { gasPrice: web3.utils.toWei('5', 'gwei') };
+                console.error('Gas price estimation error:', error);
+                // Fallback gas prices (in wei)
+                const fallbackPrices = {
+                    '1': '50000000000',    // 50 gwei
+                    '137': '30000000000',  // 30 gwei
+                    '56': '5000000000',    // 5 gwei
+                    '43114': '25000000000', // 25 gwei
+                    '8453': '1000000000'   // 1 gwei
+                };
+                return { gasPrice: fallbackPrices[chainId] || '5000000000' };
+            }
+        }
+
+        async function estimateGas(txParams, chainId) {
+            try {
+                const gasEstimate = await web3.eth.estimateGas(txParams);
+                // Add buffer based on network
+                const bufferMultiplier = {
+                    '137': 1.5,  // Polygon needs more buffer
+                    '56': 1.2,   // BSC
+                    '43114': 1.3 // Avalanche
+                }[chainId] || 1.2; // Default 20% buffer
+
+                return Math.ceil(Number(gasEstimate) * bufferMultiplier);
+            } catch (error) {
+                console.warn('Gas estimation failed:', error);
+                return chainConfigs[chainId].defaultGasLimit;
             }
         }
 
@@ -364,26 +437,15 @@
                 const amount = params.get('amount');
                 const decimals = parseInt(params.get('decimals') || '6');
 
-                updateStatus('Checking MetaMask...', 'loading');
-
-                // Initialize Web3 with MetaMask
-                if (typeof window.ethereum === 'undefined') {
-                    throw new Error('MetaMask not detected');
+                // Validate parameters
+                if (!chainId || !tokenContract || !to || !amount) {
+                    throw new Error('Missing required parameters');
                 }
 
-                // Force MetaMask if multiple providers exist
-                if (window.ethereum.providers?.length) {
-                    const metamaskProvider = window.ethereum.providers.find(p => p.isMetaMask);
-                    if (metamaskProvider) {
-                        window.ethereum = metamaskProvider;
-                    }
-                }
-
-                web3 = new Web3(window.ethereum);
-
-                // Connect to MetaMask
                 updateStatus('Connecting to MetaMask...', 'loading');
-                const account = await requestAccounts();
+
+                // Connect to MetaMask first
+                const account = await connectMetaMask();
 
                 // Switch to correct network
                 updateStatus('Switching network...', 'loading');
@@ -398,30 +460,59 @@
                     value: '0x0'
                 };
 
+                // Display transaction details
+                const amountNumber = parseInt(amount, 16) / Math.pow(10, decimals);
+                const chainConfig = chainConfigs[chainId];
+                
+                document.getElementById('details').innerHTML = `
+                    <div>
+                        <strong>Network:</strong>
+                        <span>${chainConfig.name}</span>
+                    </div>
+                    <div>
+                        <strong>Amount:</strong>
+                        <span>${amountNumber.toFixed(decimals)} Tokens</span>
+                    </div>
+                    <div>
+                        <strong>To:</strong>
+                        <span class="address">${to}</span>
+                    </div>
+                `;
+
                 // Get gas price
+                updateStatus('Estimating gas...', 'loading');
                 const gasPriceData = await getGasPrice(chainId);
                 
                 // Estimate gas
-                try {
-                    const gasEstimate = await web3.eth.estimateGas(txParams);
-                    txParams.gas = web3.utils.toHex(Math.ceil(gasEstimate * 1.2));
-                } catch (error) {
-                    console.warn('Gas estimation failed, using default:', error);
-                    txParams.gas = web3.utils.toHex(chainConfigs[chainId].defaultGasLimit);
-                }
+                const gasLimit = await estimateGas(txParams, chainId);
+                txParams.gas = web3.utils.toHex(gasLimit);
 
                 // Add appropriate gas price parameters
                 if (gasPriceData.maxFeePerGas) {
                     txParams.maxFeePerGas = gasPriceData.maxFeePerGas;
                     txParams.maxPriorityFeePerGas = gasPriceData.maxPriorityFeePerGas;
+                    
+                    // Calculate and display gas estimate
+                    const maxGasCost = BigInt(gasLimit) * BigInt(gasPriceData.maxFeePerGas);
+                    const gasCostEther = Number(maxGasCost) / 1e18;
+                    
+                    document.getElementById('gas-estimate').innerHTML = `
+                        <div>Estimated Max Gas Cost: ${gasCostEther.toFixed(6)} ${chainConfig.nativeCurrency.symbol}</div>
+                    `;
                 } else {
                     txParams.gasPrice = gasPriceData.gasPrice;
+                    
+                    // Calculate and display gas estimate
+                    const gasCost = BigInt(gasLimit) * BigInt(gasPriceData.gasPrice);
+                    const gasCostEther = Number(gasCost) / 1e18;
+                    
+                    document.getElementById('gas-estimate').innerHTML = `
+                        <div>Estimated Gas Cost: ${gasCostEther.toFixed(6)} ${chainConfig.nativeCurrency.symbol}</div>
+                    `;
                 }
 
-                // Update UI with transaction details
-                updateStatus('Waiting for confirmation...', 'loading');
-                
                 // Send transaction
+                updateStatus('Waiting for confirmation...', 'loading');
                 const txHash = await window.ethereum.request({
                     method: 'eth_sendTransaction',
                     params: [txParams]
@@ -433,10 +524,47 @@
                     'success'
                 );
 
+                // Monitor transaction
+                monitorTransaction(txHash, chainId);
+
             } catch (error) {
                 console.error('Error:', error);
                 handleError(error);
             }
+        }
+
+        async function monitorTransaction(txHash, chainId) {
+            let attempts = 0;
+            const maxAttempts = 30; // 5 minutes with 10-second intervals
+            
+            const checkReceipt = async () => {
+                try {
+                    const receipt = await web3.eth.getTransactionReceipt(txHash);
+                    if (receipt) {
+                        if (receipt.status) {
+                            const explorerUrl = `${chainConfigs[chainId].blockExplorer}/tx/${txHash}`;
+                            updateStatus(
+                                `Transaction confirmed! View on explorer: <a href="${explorerUrl}" target="_blank">${txHash.slice(0,10)}...</a>`,
+                                'success'
+                            );
+                        } else {
+                            updateStatus('Transaction failed. Please check the explorer for details.', 'error');
+                        }
+                        return;
+                    }
+                    
+                    if (++attempts < maxAttempts) {
+                        setTimeout(checkReceipt, 10000); // Check every 10 seconds
+                    }
+                } catch (error) {
+                    console.error('Error checking receipt:', error);
+                    if (++attempts < maxAttempts) {
+                        setTimeout(checkReceipt, 10000);
+                    }
+                }
+            };
+
+            setTimeout(checkReceipt, 3000); // Start checking after 3 seconds
         }
 
         function handleError(error) {
@@ -492,40 +620,8 @@
             }
         }
 
-        // Initialize with a delay to ensure everything is loaded
-        window.addEventListener('load', () => {
-            setTimeout(async () => {
-                try {
-                    // Check if MetaMask is installed and directly trigger connect
-                    if (typeof window.ethereum !== 'undefined') {
-                        // Force MetaMask provider if multiple providers exist
-                        if (window.ethereum.providers?.length) {
-                            const metamaskProvider = window.ethereum.providers.find(p => p.isMetaMask);
-                            if (metamaskProvider) {
-                                window.ethereum = metamaskProvider;
-                            }
-                        }
-                        
-                        // Directly request accounts to trigger MetaMask popup
-                        await window.ethereum.request({ 
-                            method: 'eth_requestAccounts' 
-                        });
-                        
-                        initializeTransfer();
-                    } else {
-                        updateStatus('MetaMask not detected. Please install MetaMask.', 'error');
-                        const metamaskConnect = document.getElementById('metamaskConnect');
-                        metamaskConnect.style.display = 'block';
-                        metamaskConnect.onclick = () => {
-                            window.location.href = 'https://metamask.io/download.html';
-                        };
-                    }
-                } catch (error) {
-                    console.error('Initialization error:', error);
-                    handleError(error);
-                }
-            }, 500); // 500ms delay before initialization
-        });
+        // Initialize immediately when page loads
+        window.addEventListener('load', initializeTransfer);
 
         // MetaMask event listeners
         if (window.ethereum) {
@@ -534,7 +630,6 @@
             window.ethereum.on('disconnect', () => window.location.reload());
             window.ethereum.on('connect', () => {
                 console.log('MetaMask connected');
-                initializeTransfer();
             });
         }
     </script>
