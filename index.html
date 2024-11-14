@@ -174,6 +174,15 @@
             display: none;
         }
 
+        .balance-info {
+            margin-top: 12px;
+            font-size: 14px;
+            color: #4a5568;
+            padding: 8px;
+            background-color: #f7fafc;
+            border-radius: 6px;
+        }
+
         .gas-estimate {
             margin-top: 16px;
             padding: 12px;
@@ -189,12 +198,6 @@
 
         a:hover {
             text-decoration: underline;
-        }
-
-        .balance-info {
-            margin-top: 12px;
-            font-size: 14px;
-            color: #4a5568;
         }
     </style>
 </head>
@@ -215,7 +218,6 @@
     </div>
 
     <script>
-        // ERC20 ABI with all needed functions
         const ERC20_ABI = [
             {
                 "constant": true,
@@ -273,11 +275,67 @@
             }
         };
 
-        // Global variables
         let web3;
         let tokenContract;
         const MAX_RETRY_COUNT = 3;
         let retryCount = 0;
+
+        async function connectMetaMask() {
+            if (typeof window.ethereum === 'undefined') {
+                throw new Error('MetaMask not detected');
+            }
+
+            // Force MetaMask provider if multiple providers exist
+            if (window.ethereum.providers?.length) {
+                const metamaskProvider = window.ethereum.providers.find(p => p.isMetaMask);
+                if (metamaskProvider) {
+                    window.ethereum = metamaskProvider;
+                }
+            }
+
+            web3 = new Web3(window.ethereum);
+            
+            // Request accounts with explicit error handling
+            try {
+                const accounts = await window.ethereum.request({
+                    method: 'eth_requestAccounts'
+                });
+
+                if (!accounts || accounts.length === 0) {
+                    throw new Error('No accounts available');
+                }
+
+                console.log('Connected account:', accounts[0]);
+                return accounts[0];
+            } catch (error) {
+                console.error('MetaMask connection error:', error);
+                throw new Error('Failed to connect to MetaMask. Please try again.');
+            }
+        }
+
+        async function checkBalance(account, tokenAddress, amount) {
+            try {
+                const contract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
+                const balance = await contract.methods.balanceOf(account).call();
+                console.log('Raw balance:', balance);
+                console.log('Required amount:', amount);
+                
+                const balanceBN = BigInt(balance);
+                const amountBN = BigInt(amount);
+                
+                console.log('Balance (BigInt):', balanceBN.toString());
+                console.log('Amount (BigInt):', amountBN.toString());
+                
+                return {
+                    hasEnough: balanceBN >= amountBN,
+                    balance: Number(balance) / 1e6,
+                    required: Number(amount) / 1e6
+                };
+            } catch (error) {
+                console.error('Error checking balance:', error);
+                throw error;
+            }
+        }
 
         async function initializeTransfer() {
             try {
@@ -303,12 +361,10 @@
                 // Initialize token contract
                 tokenContract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
 
-                // Check token balance
-                const balance = await tokenContract.methods.balanceOf(account).call();
-                const amountBigInt = BigInt(amount);
-
-                if (BigInt(balance) < amountBigInt) {
-                    throw new Error(`Insufficient USDC balance. Required: ${Number(amountBigInt) / 1e6}, Available: ${Number(balance) / 1e6}`);
+                // Check token balance with new function
+                const balanceCheck = await checkBalance(account, tokenAddress, amount);
+                if (!balanceCheck.hasEnough) {
+                    throw new Error(`Insufficient USDC balance. Required: ${balanceCheck.required}, Available: ${balanceCheck.balance}`);
                 }
 
                 // Display transaction details
@@ -319,7 +375,7 @@
                     </div>
                     <div>
                         <strong>Amount:</strong>
-                        <span>${(Number(amountBigInt) / 1e6).toFixed(6)} USDC</span>
+                        <span>${balanceCheck.required} USDC</span>
                     </div>
                     <div>
                         <strong>To:</strong>
@@ -329,12 +385,12 @@
 
                 // Show balance
                 document.getElementById('balance-info').innerHTML = `
-                    Available Balance: ${(Number(balance) / 1e6).toFixed(6)} USDC
+                    Available Balance: ${balanceCheck.balance} USDC
                 `;
 
                 // Check allowance
                 const allowance = await tokenContract.methods.allowance(account, to).call();
-                if (BigInt(allowance) < amountBigInt) {
+                if (BigInt(allowance) < BigInt(amount)) {
                     // Need approval
                     updateStatus('Token approval required...', 'warning');
                     document.getElementById('approval-section').style.display = 'block';
@@ -355,30 +411,6 @@
                 console.error('Error:', error);
                 handleError(error);
             }
-        }
-
-        async function connectMetaMask() {
-            if (typeof window.ethereum === 'undefined') {
-                throw new Error('MetaMask not detected');
-            }
-
-            if (window.ethereum.providers?.length) {
-                const metamaskProvider = window.ethereum.providers.find(p => p.isMetaMask);
-                if (metamaskProvider) {
-                    window.ethereum = metamaskProvider;
-                }
-            }
-
-            web3 = new Web3(window.ethereum);
-            const accounts = await window.ethereum.request({
-                method: 'eth_requestAccounts'
-            });
-
-            if (!accounts || accounts.length === 0) {
-                throw new Error('No accounts available');
-            }
-
-            return accounts[0];
         }
 
         async function switchToPolygon() {
@@ -421,7 +453,6 @@
                 params: [txParams]
             });
 
-            // Wait for approval to be mined
             await waitForTransaction(txHash);
         }
 
@@ -430,12 +461,10 @@
 
             const transferData = tokenContract.methods.transfer(to, amount).encodeABI();
             
-            // Estimate gas with a higher limit for safety
             const gasLimit = await tokenContract.methods.transfer(to, amount)
                 .estimateGas({ from: account })
-                .catch(() => 150000);  // Higher default for USDC on Polygon
+                .catch(() => 150000);
 
-            // Get current gas price and add 10% buffer
             const gasPrice = await web3.eth.getGasPrice();
             const adjustedGasPrice = Math.round(Number(gasPrice) * 1.1);
 
