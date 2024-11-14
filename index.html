@@ -261,8 +261,11 @@
 
         async function checkBalance(account, tokenAddress, amount) {
             try {
+                console.log("Checking balance for account:", account); // Debug log
                 const contract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
                 const balance = await contract.methods.balanceOf(account).call();
+                
+                console.log("Actual balance:", balance); // Debug log
                 const amountWei = `0x${amount}`; // Convert the hex string to proper format
                 
                 return {
