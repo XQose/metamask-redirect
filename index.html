@@ -103,27 +103,52 @@
                 rpcUrls: ["https://bsc-dataseed1.binance.org"],
                 nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
                 blockExplorerUrls: ["https://bscscan.com"]
+            },
+            "43114": {
+                name: "Avalanche C-Chain",
+                rpcUrls: ["https://api.avax.network/ext/bc/C/rpc"],
+                nativeCurrency: { name: "AVAX", symbol: "AVAX", decimals: 18 },
+                blockExplorerUrls: ["https://snowtrace.io"]
+            },
+            "8453": {
+                name: "Base",
+                rpcUrls: ["https://mainnet.base.org"],
+                nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+                blockExplorerUrls: ["https://basescan.org"]
             }
         };
 
+        async function initWeb3() {
+            if (typeof window.ethereum !== 'undefined') {
+                try {
+                    // Request account access
+                    await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    web3 = new Web3(window.ethereum);
+                    return true;
+                } catch (error) {
+                    console.error('User denied account access');
+                    updateStatus('Please connect your wallet to continue', 'error');
+                    return false;
+                }
+            } else {
+                updateStatus('MetaMask is not installed. Please install MetaMask to continue.', 'error');
+                return false;
+            }
+        }
+
         async function initialize() {
             try {
-                if (typeof window.ethereum === 'undefined') {
-                    updateStatus('Please install MetaMask to continue', 'error');
+                if (!await initWeb3()) {
                     return;
                 }
-
-                web3 = new Web3(window.ethereum);
                 
-                const accounts = await window.ethereum.request({ 
-                    method: 'eth_requestAccounts' 
-                });
+                const accounts = await web3.eth.getAccounts();
                 currentAccount = accounts[0];
 
                 const chainId = await web3.eth.getChainId();
-                const targetChainId = params.get('chainId');
+                const targetChainId = parseInt(params.get('chainId'));
 
-                if (chainId !== parseInt(targetChainId)) {
+                if (chainId !== targetChainId) {
                     document.getElementById('switchNetwork').style.display = 'inline-block';
                     updateStatus(`Please switch to ${chainConfigs[targetChainId].name}`, 'error');
                     return;
@@ -232,7 +257,9 @@
         }
 
         // Initialize on load
-        initialize();
+        window.addEventListener('load', () => {
+            initialize().catch(console.error);
+        });
 
         // Setup MetaMask event listeners
         if (window.ethereum) {
