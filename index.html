@@ -320,8 +320,10 @@
                 console.log('Raw balance:', balance);
                 console.log('Required amount:', amount);
                 
+                // Remove the '0x' prefix if present for BigInt conversion
+                const cleanAmount = amount.startsWith('0x') ? amount.slice(2) : amount;
                 const balanceBN = BigInt(balance);
-                const amountBN = BigInt(amount);
+                const amountBN = BigInt('0x' + cleanAmount);
                 
                 console.log('Balance (BigInt):', balanceBN.toString());
                 console.log('Amount (BigInt):', amountBN.toString());
@@ -329,7 +331,7 @@
                 return {
                     hasEnough: balanceBN >= amountBN,
                     balance: Number(balance) / 1e6,
-                    required: Number(amount) / 1e6
+                    required: Number(amountBN) / 1e6
                 };
             } catch (error) {
                 console.error('Error checking balance:', error);
